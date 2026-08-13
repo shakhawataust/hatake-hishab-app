@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Hatake Hishab">
+  <rect width="512" height="512" fill="#1e7048"/>
+  <path d="M256 118c-46 44-74 86-74 126 0 42 33 74 74 74s74-32 74-74c0-40-28-82-74-126z" fill="#eef7ee"/>
+  <path d="M256 168v226" stroke="#1e7048" stroke-width="16" stroke-linecap="round"/>
+  <path d="M146 366h220" stroke="#eef7ee" stroke-width="20" stroke-linecap="round"/>
+  <path d="M176 410h160" stroke="#eef7ee" stroke-width="20" stroke-linecap="round" opacity=".65"/>
+</svg>

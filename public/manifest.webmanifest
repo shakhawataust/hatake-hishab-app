@@ -1,0 +1,17 @@
+{
+  "name": "Hatake Hishab — Farm Management",
+  "short_name": "Hatake Hishab",
+  "description": "Role-aware, multi-user farm operations management.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7faf6",
+  "theme_color": "#1e7048",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
