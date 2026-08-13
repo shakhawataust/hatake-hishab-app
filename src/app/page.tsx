@@ -474,6 +474,7 @@ export default function Home() {
       setLoading(false);
       return;
     }
+    await supabase.rpc("claim_pending_farm_invites");
     const { data: membership } = await supabase
       .from("farm_members")
       .select("role, farms(id,name)")
@@ -823,14 +824,16 @@ export default function Home() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     setBusy(true);
-    const result = await supabase.rpc("invite_farm_member", {
+    const result = await supabase.rpc("invite_or_add_farm_member", {
       target_farm: farm.id,
       member_email: String(form.get("email")).trim().toLowerCase(),
       desired_role: String(form.get("role")) as MemberRole,
     });
     setBusy(false);
     setNotice(
-      result.error ? result.error.message : "Member added to this farm.",
+      result.error
+        ? result.error.message
+        : (result.data ?? "Member added to this farm."),
     );
     if (!result.error) formElement.reset();
   }
@@ -2141,9 +2144,13 @@ export default function Home() {
                 detail={`${crops.length - 1} available crops`}
               />
               <div className="crop-list-grid">
-                {crops.filter((crop) => crop !== "Other").map((crop) => (
-                  <span key={crop} className="crop-list-chip">{crop}</span>
-                ))}
+                {crops
+                  .filter((crop) => crop !== "Other")
+                  .map((crop) => (
+                    <span key={crop} className="crop-list-chip">
+                      {crop}
+                    </span>
+                  ))}
               </div>
             </article>
             <article className="finance-card planner-guide">
@@ -2913,8 +2920,9 @@ export default function Home() {
                 </p>
               )}
               <p className="small-pro">
-                The member must first create an account with this same email
-                address.
+                If the email has not registered yet, a pending invitation is
+                saved. It will link automatically after they create an account
+                with the same email address.
               </p>
             </article>
             <article className="finance-card settings-page">
