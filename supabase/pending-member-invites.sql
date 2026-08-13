@@ -11,6 +11,13 @@ create table if not exists public.farm_member_invites (
 
 alter table public.farm_member_invites enable row level security;
 
+-- Writes happen only inside the security-definer functions below, so members
+-- need read access and nothing more. Without a policy the table is invisible
+-- to everyone and a farm's admin cannot see its own pending invites.
+drop policy if exists "farm members read invites" on public.farm_member_invites;
+create policy "farm members read invites" on public.farm_member_invites
+  for select using (public.is_farm_member(farm_id));
+
 create or replace function public.invite_or_add_farm_member(
   target_farm uuid,
   member_email text,
