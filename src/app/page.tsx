@@ -377,6 +377,10 @@ const yen = (value: number) =>
     currency: "JPY",
     maximumFractionDigits: 0,
   }).format(value);
+const transportFromNote = (note?: string | null) => {
+  const match = note?.match(/Transport:\s*[¥￥]?\s*([\d,]+)/i)?.[1];
+  return Number((match ?? "0").replaceAll(",", "")) || 0;
+};
 const today = () => new Date().toISOString().slice(0, 10);
 const kindForView = (view: View): Kind =>
   view === "sales"
@@ -1284,28 +1288,38 @@ export default function Home() {
       .filter((entry) => entry.kind === "expense" || entry.kind === "labor")
       .reduce<Record<string, number>>((all, entry) => {
         const detail = `${entry.crop ?? ""} ${entry.note ?? ""}`.toLowerCase();
+        const amount = Number(entry.amount ?? 0);
+        if (entry.kind === "labor") {
+          // A labor amount is hours * rate + transport, so split the travel
+          // part out and keep it in the transport category.
+          const transport = Math.min(transportFromNote(entry.note), amount);
+          const wages = amount - transport;
+          if (transport)
+            all["Transport / যাতায়াত"] =
+              (all["Transport / যাতায়াত"] ?? 0) + transport;
+          if (wages) all["Labor / শ্রম"] = (all["Labor / শ্রম"] ?? 0) + wages;
+          return all;
+        }
         const category =
-          entry.kind === "labor"
-            ? "Labor / Travel"
-            : detail.includes("fertil") || detail.includes("সার")
-              ? "Fertilizer / সার"
-              : detail.includes("pestic") ||
-                  detail.includes("insect") ||
-                  detail.includes("medicine") ||
-                  detail.includes("ওষুধ")
-                ? "Pesticide / Medicine"
-                : detail.includes("seed") || detail.includes("বীজ")
-                  ? "Seeds / বীজ"
-                  : detail.includes("transport") ||
-                      detail.includes("fuel") ||
-                      detail.includes("যাতায়াত")
-                    ? "Transport / যাতায়াত"
-                    : detail.includes("tool") ||
-                        detail.includes("cutter") ||
-                        detail.includes("drill")
-                      ? "Tools / টুলস"
-                      : "Other / অন্যান্য";
-        all[category] = (all[category] ?? 0) + Number(entry.amount ?? 0);
+          detail.includes("fertil") || detail.includes("সার")
+            ? "Fertilizer / সার"
+            : detail.includes("pestic") ||
+                detail.includes("insect") ||
+                detail.includes("medicine") ||
+                detail.includes("ওষুধ")
+              ? "Pesticide / Medicine"
+              : detail.includes("seed") || detail.includes("বীজ")
+                ? "Seeds / বীজ"
+                : detail.includes("transport") ||
+                    detail.includes("fuel") ||
+                    detail.includes("যাতায়াত")
+                  ? "Transport / যাতায়াত"
+                  : detail.includes("tool") ||
+                      detail.includes("cutter") ||
+                      detail.includes("drill")
+                    ? "Tools / টুলস"
+                    : "Other / অন্যান্য";
+        all[category] = (all[category] ?? 0) + amount;
         return all;
       }, {}),
   ).sort((a, b) => b[1] - a[1]);
@@ -1367,10 +1381,7 @@ export default function Home() {
           entry.note?.match(/Member:\s*([^|]+)/i)?.[1] ?? "Unassigned";
         const item = getMember(name);
         item.hours += Number(entry.quantity ?? 0);
-        const travel = entry.note?.match(
-          /Transport:\s*[¥￥]?\s*([\d,]+)/i,
-        )?.[1];
-        item.travel += Number((travel ?? "0").replaceAll(",", ""));
+        item.travel += transportFromNote(entry.note);
       });
     investments.forEach((investment) => {
       getMember(investment.member).investment += investment.amount;
