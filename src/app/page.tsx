@@ -368,6 +368,7 @@ const expenseCategories = [
   "Rent / ভাড়া",
   "Other / অন্যান্য",
 ];
+const laborCategory = "Labor / Travel";
 const careAlertsKey = "hatake-hishab-care-alerts";
 const investmentsKey = "hatake-hishab-investments";
 
@@ -1290,14 +1291,10 @@ export default function Home() {
         const detail = `${entry.crop ?? ""} ${entry.note ?? ""}`.toLowerCase();
         const amount = Number(entry.amount ?? 0);
         if (entry.kind === "labor") {
-          // A labor amount is hours * rate + transport, so split the travel
-          // part out and keep it in the transport category.
-          const transport = Math.min(transportFromNote(entry.note), amount);
-          const wages = amount - transport;
-          if (transport)
-            all["Transport / যাতায়াত"] =
-              (all["Transport / যাতায়াত"] ?? 0) + transport;
-          if (wages) all["Labor / শ্রম"] = (all["Labor / শ্রম"] ?? 0) + wages;
+          // Keep the whole labor amount (hours * rate + transport) in one
+          // bucket so it matches the Labor & Travel page total. The travel
+          // share is called out under the label.
+          all[laborCategory] = (all[laborCategory] ?? 0) + amount;
           return all;
         }
         const category =
@@ -1324,6 +1321,14 @@ export default function Home() {
       }, {}),
   ).sort((a, b) => b[1] - a[1]);
   const maxExpenseMix = Math.max(1, ...expenseMix.map(([, amount]) => amount));
+  const laborTravel = entries
+    .filter((entry) => entry.kind === "labor")
+    .reduce(
+      (total, entry) =>
+        total +
+        Math.min(transportFromNote(entry.note), Number(entry.amount ?? 0)),
+      0,
+    );
   const lowStock = inventory.filter((item) => Number(item.quantity) <= 2);
   const customerNames = [
     ...new Set(orders.map((order) => order.customer_name)),
@@ -1535,7 +1540,11 @@ export default function Home() {
                     expenseMix.slice(0, 7).map(([category, amount]) => (
                       <div className="expense-progress" key={category}>
                         <div>
-                          <span>{category}</span>
+                          <span>
+                            {category === laborCategory && laborTravel
+                              ? `${category} — wages ${yen(amount - laborTravel)} + travel ${yen(laborTravel)}`
+                              : category}
+                          </span>
                           <b>{yen(amount)}</b>
                         </div>
                         <i>
