@@ -5,7 +5,9 @@ Multi-user farm management foundation built with Next.js and Supabase.
 ## Local setup
 
 1. Create a Supabase project.
-2. Run `supabase/schema.sql` in its SQL Editor.
+2. Run `supabase/schema.sql` in its SQL Editor, then the add-on scripts in this
+   order: `member-management.sql`, `crop-planner.sql`,
+   `pending-member-invites.sql`, `cash-handovers.sql`.
 3. The SQL creates the private `receipts` Storage bucket and its access policies.
 4. Copy `.env.example` to `.env.local`, then add the project URL and publishable key.
 5. Run `npm run dev` and open `http://localhost:3000`.

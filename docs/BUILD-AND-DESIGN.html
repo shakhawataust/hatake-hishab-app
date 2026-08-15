@@ -373,13 +373,15 @@ Vercel's free Hobby tier forbids commercial use. If the farm is a business, eith
 </svg>
 </div>
 
-<h3>The three SQL files</h3>
-<p>Run in this order in the Supabase SQL Editor. <b>All three are already applied to your live project</b> — verified directly against the database.</p>
+<h3>The SQL files</h3>
+<p>Run in this order in the Supabase SQL Editor. <b>All five are already applied to your live project</b> — verified directly against the database.</p>
 <table>
 <tr><th>File</th><th>Creates</th><th>Status</th></tr>
 <tr><td><code>supabase/schema.sql</code></td><td>8 tables, <code>is_farm_member()</code>, <code>create_farm()</code>, the new-user trigger, all RLS policies, the private receipts bucket</td><td><span class="pill pill-ok">applied</span></td></tr>
 <tr><td><code>supabase/member-management.sql</code></td><td>Adds the <code>sales</code> role; <code>invite_farm_member()</code></td><td><span class="pill pill-ok">applied</span></td></tr>
 <tr><td><code>supabase/crop-planner.sql</code></td><td>7 extra <code>crop_batches</code> columns; the <code>crop_tasks</code> table and its policy</td><td><span class="pill pill-ok">applied</span></td></tr>
+<tr><td><code>supabase/pending-member-invites.sql</code></td><td>The <code>farm_member_invites</code> table; <code>claim_pending_farm_invites()</code>, so a member can be invited before they register</td><td><span class="pill pill-ok">applied</span></td></tr>
+<tr><td><code>supabase/cash-handovers.sql</code></td><td>The <code>cash_handovers</code> table and its policy — cash passed from one member to another, kept out of <code>transactions</code> so it never moves profit or loss</td><td><span class="pill pill-ok">applied</span></td></tr>
 </table>
 <p class="muted">Verification method: each table was queried over the REST API, and each function was called with correct arguments. Both functions rejected the probe with the <i>expected business-logic error</i> — <code>create_farm</code> refused a null owner, <code>invite_farm_member</code> replied "Only a farm admin can add members." A missing function returns a different error entirely, so these responses confirm they exist and their guards work.</p>
 </section>

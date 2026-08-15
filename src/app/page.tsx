@@ -42,6 +42,14 @@ type CropTask = {
   instruction: string | null;
   completed: boolean;
 };
+type CashHandover = {
+  id: string;
+  occurred_on: string;
+  from_holder: string;
+  to_holder: string;
+  amount: number;
+  note: string | null;
+};
 type InventoryItem = {
   id: string;
   name: string;
@@ -250,6 +258,66 @@ const laborText: Record<
     cost: "費用",
     remove: "削除",
     none: "作業・交通の記録はまだありません。",
+  },
+};
+const handoverText: Record<
+  Language,
+  {
+    title: string;
+    detail: string;
+    from: string;
+    to: string;
+    amount: string;
+    save: string;
+    update: string;
+    cancel: string;
+    records: string;
+    none: string;
+    sameHolder: string;
+    hint: string;
+  }
+> = {
+  bn: {
+    title: "টাকা হাতবদল",
+    detail: "কার কাছ থেকে কার কাছে",
+    from: "কার কাছ থেকে",
+    to: "কার কাছে গেল",
+    amount: "পরিমাণ (¥)",
+    save: "হাতবদল সংরক্ষণ করুন",
+    update: "হাতবদল আপডেট করুন",
+    cancel: "সম্পাদনা বাতিল",
+    records: "হাতবদলের রেকর্ড",
+    none: "এখনো কোনো হাতবদল নেই।",
+    sameHolder: "কার কাছ থেকে ও কার কাছে — দুই নাম আলাদা হতে হবে।",
+    hint: "এটি খরচ নয় — শুধু টাকা কার কাছে আছে সেটা বদলায়।",
+  },
+  en: {
+    title: "Cash handover",
+    detail: "Who passed money to whom",
+    from: "From",
+    to: "To (member or bank)",
+    amount: "Amount (¥)",
+    save: "Save handover",
+    update: "Update handover",
+    cancel: "Cancel edit",
+    records: "Handover records",
+    none: "No handovers recorded yet.",
+    sameHolder: "From and To must be two different names.",
+    hint: "Not an expense — it only moves cash from one person to another.",
+  },
+  ja: {
+    title: "現金の渡し",
+    detail: "誰から誰へ",
+    from: "渡し元",
+    to: "渡し先（メンバー・銀行）",
+    amount: "金額 (¥)",
+    save: "渡しを保存",
+    update: "渡しを更新",
+    cancel: "編集を中止",
+    records: "渡しの記録",
+    none: "渡しの記録はまだありません。",
+    sameHolder: "渡し元と渡し先には別の名前を入力してください。",
+    hint: "経費ではありません。現金の保管者が変わるだけです。",
   },
 };
 const commonText: Record<
@@ -493,6 +561,7 @@ export default function Home() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [batches, setBatches] = useState<CropBatch[]>([]);
   const [cropTasks, setCropTasks] = useState<CropTask[]>([]);
+  const [handovers, setHandovers] = useState<CashHandover[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [orders, setOrders] = useState<FarmOrder[]>([]);
   const [careAlerts, setCareAlerts] = useState<CareAlert[]>([]);
@@ -503,6 +572,9 @@ export default function Home() {
   const [editing, setEditing] = useState<Entry | null>(null);
   const [editingBatch, setEditingBatch] = useState<CropBatch | null>(null);
   const [editingTask, setEditingTask] = useState<CropTask | null>(null);
+  const [editingHandover, setEditingHandover] = useState<CashHandover | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -521,6 +593,7 @@ export default function Home() {
       setEntries([]);
       setBatches([]);
       setCropTasks([]);
+      setHandovers([]);
       setInventory([]);
       setOrders([]);
       setLoading(false);
@@ -553,6 +626,7 @@ export default function Home() {
         inventoryResult,
         orderResult,
         taskResult,
+        handoverResult,
       ] = await Promise.all([
         supabase
           .from("transactions")
@@ -580,12 +654,18 @@ export default function Home() {
           .select("*")
           .eq("farm_id", selected.id)
           .order("due_on"),
+        supabase
+          .from("cash_handovers")
+          .select("*")
+          .eq("farm_id", selected.id)
+          .order("occurred_on", { ascending: false }),
       ]);
       setEntries((entryResult.data ?? []) as Entry[]);
       setBatches((batchResult.data ?? []) as CropBatch[]);
       setInventory((inventoryResult.data ?? []) as InventoryItem[]);
       setOrders((orderResult.data ?? []) as FarmOrder[]);
       setCropTasks((taskResult.data ?? []) as CropTask[]);
+      setHandovers((handoverResult.data ?? []) as CashHandover[]);
     } else setFarm(null);
     setLoading(false);
   }
@@ -789,6 +869,61 @@ export default function Home() {
     const result = await supabase.from("transactions").delete().eq("id", id);
     setBusy(false);
     setNotice(result.error ? result.error.message : "Record deleted.");
+    if (!result.error) await loadWorkspace();
+  }
+
+  async function saveHandover(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !farm) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const fromHolder = String(form.get("from_holder")).trim();
+    const toHolder = String(form.get("to_holder")).trim();
+    // Postgres rejects this too, but the member deserves a readable reason.
+    if (fromHolder.toLowerCase() === toHolder.toLowerCase()) {
+      setNotice(handover.sameHolder);
+      return;
+    }
+    const { data: sessionData } = await supabase.auth.getSession();
+    setBusy(true);
+    const record = {
+      occurred_on: form.get("date"),
+      from_holder: fromHolder,
+      to_holder: toHolder,
+      amount: Number(form.get("amount")) || 0,
+      note: String(form.get("note")).trim() || null,
+    };
+    const result = editingHandover
+      ? await supabase
+          .from("cash_handovers")
+          .update(record)
+          .eq("id", editingHandover.id)
+      : await supabase.from("cash_handovers").insert({
+          ...record,
+          farm_id: farm.id,
+          created_by: sessionData.session?.user.id,
+        });
+    setBusy(false);
+    setNotice(
+      result.error
+        ? result.error.message
+        : editingHandover
+          ? "Handover updated."
+          : "Handover saved.",
+    );
+    if (!result.error) {
+      formElement.reset();
+      setEditingHandover(null);
+      await loadWorkspace();
+    }
+  }
+
+  async function deleteHandover(id: string) {
+    if (!supabase || !window.confirm("Delete this handover?")) return;
+    setBusy(true);
+    const result = await supabase.from("cash_handovers").delete().eq("id", id);
+    setBusy(false);
+    setNotice(result.error ? result.error.message : "Handover deleted.");
     if (!result.error) await loadWorkspace();
   }
 
@@ -1276,6 +1411,11 @@ export default function Home() {
     setNotice(`Editing batch ${batch.code}.`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  const startHandoverEdit = (record: CashHandover) => {
+    setEditingHandover(record);
+    setNotice(`Editing the handover from ${record.from_holder}.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const startEdit = (entry: Entry) => {
     setEditing(entry);
     setNotice("Editing a saved record.");
@@ -1288,9 +1428,23 @@ export default function Home() {
   // Cash each person is carrying: money they collected from paid sales, less
   // whatever they have already spent on farm expenses.
   const cashInHand = (() => {
-    const people = new Map<string, { collected: number; spent: number }>();
+    const people = new Map<
+      string,
+      {
+        collected: number;
+        spent: number;
+        handedOut: number;
+        received: number;
+      }
+    >();
     const person = (name: string) => {
-      if (!people.has(name)) people.set(name, { collected: 0, spent: 0 });
+      if (!people.has(name))
+        people.set(name, {
+          collected: 0,
+          spent: 0,
+          handedOut: 0,
+          received: 0,
+        });
       return people.get(name)!;
     };
     paidSales.forEach((entry) => {
@@ -1304,11 +1458,17 @@ export default function Home() {
         // No payer recorded means we cannot say whose cash it came out of.
         if (payer) person(payer).spent += Number(entry.amount ?? 0);
       });
+    // A handover is not income or expense: the same yen simply changes hands.
+    handovers.forEach((record) => {
+      person(record.from_holder).handedOut += Number(record.amount ?? 0);
+      person(record.to_holder).received += Number(record.amount ?? 0);
+    });
     return [...people.entries()]
       .map(([name, totals]) => ({
         name,
         ...totals,
-        balance: totals.collected - totals.spent,
+        balance:
+          totals.collected + totals.received - totals.spent - totals.handedOut,
       }))
       .sort((a, b) => b.balance - a.balance);
   })();
@@ -1333,13 +1493,17 @@ export default function Home() {
   // Names already used anywhere, so the field can be filled with one tap.
   const knownHolders = [
     ...new Set(
-      entries
-        .flatMap((entry) => [
+      [
+        ...entries.flatMap((entry) => [
           noteValue(entry.note, "Cash with"),
           noteValue(entry.note, "Paid by"),
           noteValue(entry.note, "Member"),
-        ])
-        .filter(Boolean),
+        ]),
+        ...handovers.flatMap((record) => [
+          record.from_holder,
+          record.to_holder,
+        ]),
+      ].filter(Boolean),
     ),
   ].sort();
 
@@ -1554,10 +1718,12 @@ export default function Home() {
   const text = interfaceText[language];
   const labor = laborText[language];
   const common = commonText[language];
+  const handover = handoverText[language];
   const changeView = (next: View) => {
     setEditing(null);
     setEditingBatch(null);
     setEditingTask(null);
+    setEditingHandover(null);
     setNotice("");
     setView(next);
   };
@@ -2181,6 +2347,120 @@ export default function Home() {
                         <span>Older sales without payment status</span>
                         <b>{yen(untaggedSales)}</b>
                       </p>
+                    )}
+                  </div>
+                  <SectionTitle
+                    title={handover.title}
+                    detail={handover.detail}
+                  />
+                  <form
+                    className="finance-form"
+                    onSubmit={saveHandover}
+                    key={editingHandover?.id ?? "new-handover"}
+                  >
+                    <label>
+                      {common.date}
+                      <input
+                        name="date"
+                        type="date"
+                        defaultValue={editingHandover?.occurred_on ?? today()}
+                        required
+                      />
+                    </label>
+                    <label>
+                      {handover.amount}
+                      <input
+                        name="amount"
+                        type="number"
+                        min="1"
+                        required
+                        defaultValue={editingHandover?.amount ?? ""}
+                      />
+                    </label>
+                    <label>
+                      {handover.from}
+                      <input
+                        name="from_holder"
+                        list="known-holders"
+                        required
+                        placeholder="Shakhawat"
+                        defaultValue={editingHandover?.from_holder ?? ""}
+                      />
+                    </label>
+                    <label>
+                      {handover.to}
+                      <input
+                        name="to_holder"
+                        list="known-holders"
+                        required
+                        placeholder="Rafi / Bank"
+                        defaultValue={editingHandover?.to_holder ?? ""}
+                      />
+                    </label>
+                    <label className="full">
+                      {common.note}
+                      <input
+                        name="note"
+                        placeholder="Handed over at the field"
+                        defaultValue={editingHandover?.note ?? ""}
+                      />
+                    </label>
+                    <button className="finance-button full" disabled={busy}>
+                      {editingHandover ? handover.update : handover.save}
+                    </button>
+                    {editingHandover && (
+                      <button
+                        type="button"
+                        className="finance-button secondary full"
+                        onClick={() => setEditingHandover(null)}
+                      >
+                        {handover.cancel}
+                      </button>
+                    )}
+                    <p className="small-pro full">{handover.hint}</p>
+                  </form>
+                  <SectionTitle
+                    title={handover.records}
+                    detail={`${handovers.length} ${common.records}`}
+                  />
+                  <div className="summary-list">
+                    {handovers.length ? (
+                      handovers.map((record) => (
+                        <p className="crop-row" key={record.id}>
+                          <span>
+                            <b>
+                              {record.from_holder} → {record.to_holder}
+                            </b>
+                            <small>
+                              {record.occurred_on}
+                              {record.note ? ` · ${record.note}` : ""}
+                            </small>
+                          </span>
+                          <span className="table-actions">
+                            <b>{yen(Number(record.amount ?? 0))}</b>
+                            <button
+                              type="button"
+                              className="table-edit"
+                              disabled={busy}
+                              onClick={() => startHandoverEdit(record)}
+                            >
+                              {editingHandover?.id === record.id
+                                ? "Editing…"
+                                : "Edit"}
+                            </button>
+                            <button
+                              type="button"
+                              className="table-delete"
+                              disabled={busy}
+                              onClick={() => void deleteHandover(record.id)}
+                            >
+                              {common.delete}
+                            </button>
+                          </span>
+                        </p>
+                      ))
+                    ) : (
+                      <p className="empty-copy">{handover.none}</p>
                     )}
                   </div>
                 </>
