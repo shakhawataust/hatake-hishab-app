@@ -338,6 +338,11 @@ const commonText: Record<
     stock: string;
     delete: string;
     noRecords: string;
+    selectHolder: string;
+    newName: string;
+    chooseFromList: string;
+    paidBy: string;
+    spentBy: string;
   }
 > = {
   bn: {
@@ -356,6 +361,11 @@ const commonText: Record<
     stock: "স্টক",
     delete: "মুছুন",
     noRecords: "এখনো কোনো রেকর্ড নেই।",
+    selectHolder: "নাম নির্বাচন করুন",
+    newName: "＋ নতুন নাম",
+    chooseFromList: "তালিকা থেকে বেছে নিন",
+    paidBy: "কে টাকা দিয়েছে",
+    spentBy: "কে কত খরচ করেছে",
   },
   en: {
     date: "Date",
@@ -373,6 +383,11 @@ const commonText: Record<
     stock: "Stock",
     delete: "Delete",
     noRecords: "No records yet.",
+    selectHolder: "Select a name",
+    newName: "＋ New name",
+    chooseFromList: "Choose from the list",
+    paidBy: "Paid by",
+    spentBy: "Who spent how much",
   },
   ja: {
     date: "日付",
@@ -390,6 +405,11 @@ const commonText: Record<
     stock: "在庫",
     delete: "削除",
     noRecords: "記録はまだありません。",
+    selectHolder: "名前を選択",
+    newName: "＋ 新しい名前",
+    chooseFromList: "一覧から選ぶ",
+    paidBy: "支払者",
+    spentBy: "誰がいくら使ったか",
   },
 };
 const crops = [
@@ -490,6 +510,25 @@ const freeNote = (note: string | null | undefined) =>
         !noteLabels.some((label) => new RegExp(`^${label}:`, "i").test(part)),
     )
     .join(" | ");
+// Expenses imported from the 2026 workbook name their payer in the note text
+// rather than in a "Paid by" label, so read that too instead of dropping the
+// money into an unattributed pile.
+const importedPayer = (note?: string | null) =>
+  note?.match(/Hatake 2026 import — ([A-Za-z]+)(?:\s*[(|]|$)/)?.[1] ?? "";
+const payerOf = (entry: Entry) =>
+  noteValue(entry.note, "Paid by") ||
+  (entry.kind === "expense" ? importedPayer(entry.note) : "");
+// Expense total per person, biggest spender first.
+const spendByPerson = (rows: Entry[]) => {
+  const totals = new Map<string, number>();
+  rows
+    .filter((entry) => entry.kind === "expense")
+    .forEach((entry) => {
+      const name = payerOf(entry) || unknownHolder;
+      totals.set(name, (totals.get(name) ?? 0) + Number(entry.amount ?? 0));
+    });
+  return [...totals.entries()].sort(([, a], [, b]) => b - a);
+};
 const transportFromNote = (note?: string | null) => {
   const match = note?.match(/Transport:\s*[¥￥]?\s*([\d,]+)/i)?.[1];
   return Number((match ?? "0").replaceAll(",", "")) || 0;
@@ -1454,7 +1493,7 @@ export default function Home() {
     entries
       .filter((entry) => entry.kind === "expense")
       .forEach((entry) => {
-        const payer = noteValue(entry.note, "Paid by");
+        const payer = payerOf(entry);
         // No payer recorded means we cannot say whose cash it came out of.
         if (payer) person(payer).spent += Number(entry.amount ?? 0);
       });
@@ -1473,9 +1512,7 @@ export default function Home() {
       .sort((a, b) => b.balance - a.balance);
   })();
   const untrackedSpend = entries
-    .filter(
-      (entry) => entry.kind === "expense" && !noteValue(entry.note, "Paid by"),
-    )
+    .filter((entry) => entry.kind === "expense" && !payerOf(entry))
     .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
   const pendingSales = entries
     .filter(
@@ -1496,7 +1533,7 @@ export default function Home() {
       [
         ...entries.flatMap((entry) => [
           noteValue(entry.note, "Cash with"),
-          noteValue(entry.note, "Paid by"),
+          payerOf(entry),
           noteValue(entry.note, "Member"),
         ]),
         ...handovers.flatMap((record) => [
@@ -1638,6 +1675,11 @@ export default function Home() {
       }, {}),
   ).sort((a, b) => b[1] - a[1]);
   const maxExpenseMix = Math.max(1, ...expenseMix.map(([, amount]) => amount));
+  const paidByMix = spendByPerson(entries);
+  const paidByTotal = paidByMix.reduce(
+    (total, [, amount]) => total + amount,
+    0,
+  );
   const laborTravel = entries
     .filter((entry) => entry.kind === "labor")
     .reduce(
@@ -1688,12 +1730,12 @@ export default function Home() {
   const reportMembers = (() => {
     const members = new Map<
       string,
-      { hours: number; travel: number; investment: number }
+      { hours: number; travel: number; investment: number; paid: number }
     >();
     const getMember = (name: string) => {
       const key = name.trim() || "Unassigned";
       if (!members.has(key))
-        members.set(key, { hours: 0, travel: 0, investment: 0 });
+        members.set(key, { hours: 0, travel: 0, investment: 0, paid: 0 });
       return members.get(key)!;
     };
     reportEntries
@@ -1705,12 +1747,18 @@ export default function Home() {
         item.hours += Number(entry.quantity ?? 0);
         item.travel += transportFromNote(entry.note);
       });
-    investments.forEach((investment) => {
-      getMember(investment.member).investment += investment.amount;
+    spendByPerson(reportEntries).forEach(([name, amount]) => {
+      getMember(name).paid += amount;
     });
+    // Only this month's money, like every other figure on the report.
+    investments
+      .filter((investment) => investment.date.startsWith(reportMonth))
+      .forEach((investment) => {
+        getMember(investment.member).investment += investment.amount;
+      });
     return [...members.entries()]
       .map(([name, totals]) => ({ name, ...totals }))
-      .sort((a, b) => b.investment + b.hours - (a.investment + a.hours));
+      .sort((a, b) => b.paid + b.investment - (a.paid + a.investment));
   })();
   const capitalTotal = investments
     .filter((item) => item.type === "Capital")
@@ -1887,6 +1935,44 @@ export default function Home() {
                   )}
                 </div>
               </article>
+            </section>
+            <section className="finance-card crop-sales-card">
+              <SectionTitle
+                title={common.spentBy}
+                detail={`${yen(paidByTotal)} of ${yen(summary.expense)} total`}
+              />
+              <div className="expense-mix">
+                {paidByMix.length ? (
+                  paidByMix.map(([person, amount]) => (
+                    <div className="expense-progress" key={person}>
+                      <div>
+                        <span>
+                          {person}
+                          {paidByTotal
+                            ? ` — ${Math.round((amount / paidByTotal) * 100)}%`
+                            : ""}
+                        </span>
+                        <b>{yen(amount)}</b>
+                      </div>
+                      <i>
+                        <em
+                          style={{
+                            width: `${(amount / Math.max(1, paidByMix[0][1])) * 100}%`,
+                          }}
+                        />
+                      </i>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-copy">No expense records yet.</p>
+                )}
+              </div>
+              <p className="small-pro">
+                The remaining {yen(summary.expense - paidByTotal)} is wages and
+                travel from the Labor &amp; Travel page — what the farm owes a
+                member, not money they paid out, so nobody is charged for it
+                here.
+              </p>
             </section>
             <section className="finance-card crop-sales-card">
               <SectionTitle title="ফসল অনুযায়ী আয়" detail="Sales value" />
@@ -2185,20 +2271,15 @@ export default function Home() {
                   />
                 </label>
                 {view === "expense" && (
-                  <label>
-                    Paid by
-                    <input
-                      name="paid_by"
-                      placeholder="Hossain / Rafi"
-                      list="known-holders"
-                      defaultValue={editField("Paid by")}
-                    />
-                    <datalist id="known-holders">
-                      {knownHolders.map((holder) => (
-                        <option key={holder} value={holder} />
-                      ))}
-                    </datalist>
-                  </label>
+                  <HolderSelect
+                    name="paid_by"
+                    label={common.paidBy}
+                    options={knownHolders}
+                    words={common}
+                    required
+                    placeholder="Rafi"
+                    defaultValue={editing ? payerOf(editing) : ""}
+                  />
                 )}
                 {view === "sales" && (
                   <>
@@ -2236,24 +2317,20 @@ export default function Home() {
                         <option>Pending</option>
                       </select>
                     </label>
-                    <label>
-                      {language === "bn"
-                        ? "টাকা কার কাছে"
-                        : language === "ja"
-                          ? "代金の保管者"
-                          : "Cash with"}
-                      <input
-                        name="cash_with"
-                        list="known-holders"
-                        placeholder="Shakhawat / Rafi"
-                        defaultValue={editField("Cash with")}
-                      />
-                      <datalist id="known-holders">
-                        {knownHolders.map((holder) => (
-                          <option key={holder} value={holder} />
-                        ))}
-                      </datalist>
-                    </label>
+                    <HolderSelect
+                      name="cash_with"
+                      label={
+                        language === "bn"
+                          ? "টাকা কার কাছে"
+                          : language === "ja"
+                            ? "代金の保管者"
+                            : "Cash with"
+                      }
+                      options={knownHolders}
+                      words={common}
+                      placeholder="Shakhawat"
+                      defaultValue={editField("Cash with")}
+                    />
                   </>
                 )}
                 {view === "harvest" && (
@@ -2349,6 +2426,15 @@ export default function Home() {
                       </p>
                     )}
                   </div>
+                  {cashInHand.some((holder) => holder.balance < 0) && (
+                    <p className="small-pro">
+                      {language === "bn"
+                        ? "মাইনাস ব্যালেন্স মানে সদস্য নিজের পকেট থেকে খামারের খরচ দিয়েছে — খামার তার কাছে ওই টাকা ঋণী।"
+                        : language === "ja"
+                          ? "マイナスの残高は、そのメンバーが自己負担で農園の費用を払った分です。農園がその人に返すべき金額です。"
+                          : "A negative balance means the member paid farm costs out of their own pocket — the farm owes them that much."}
+                    </p>
+                  )}
                   <SectionTitle
                     title={handover.title}
                     detail={handover.detail}
@@ -2377,26 +2463,24 @@ export default function Home() {
                         defaultValue={editingHandover?.amount ?? ""}
                       />
                     </label>
-                    <label>
-                      {handover.from}
-                      <input
-                        name="from_holder"
-                        list="known-holders"
-                        required
-                        placeholder="Shakhawat"
-                        defaultValue={editingHandover?.from_holder ?? ""}
-                      />
-                    </label>
-                    <label>
-                      {handover.to}
-                      <input
-                        name="to_holder"
-                        list="known-holders"
-                        required
-                        placeholder="Rafi / Bank"
-                        defaultValue={editingHandover?.to_holder ?? ""}
-                      />
-                    </label>
+                    <HolderSelect
+                      name="from_holder"
+                      label={handover.from}
+                      options={knownHolders}
+                      words={common}
+                      required
+                      placeholder="Shakhawat"
+                      defaultValue={editingHandover?.from_holder ?? ""}
+                    />
+                    <HolderSelect
+                      name="to_holder"
+                      label={handover.to}
+                      options={knownHolders}
+                      words={common}
+                      required
+                      placeholder="Bank"
+                      defaultValue={editingHandover?.to_holder ?? ""}
+                    />
                     <label className="full">
                       {common.note}
                       <input
@@ -3560,13 +3644,14 @@ export default function Home() {
             <section className="report-contributions">
               <SectionTitle
                 title="Member Contribution"
-                detail="Hours + investment"
+                detail="Expenses paid + hours + investment"
               />
               <div className="finance-table-wrap">
                 <table className="finance-table">
                   <thead>
                     <tr>
                       <th>Member</th>
+                      <th>{common.paidBy}</th>
                       <th>Hours</th>
                       <th>Travel</th>
                       <th>Investment</th>
@@ -3577,6 +3662,7 @@ export default function Home() {
                       reportMembers.map((member) => (
                         <tr key={member.name}>
                           <td>{member.name}</td>
+                          <td>{member.paid ? yen(member.paid) : "—"}</td>
                           <td>{member.hours.toFixed(1)} h</td>
                           <td>{yen(member.travel)}</td>
                           <td>{yen(member.investment)}</td>
@@ -3584,7 +3670,7 @@ export default function Home() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={4}>No member contribution records yet.</td>
+                        <td colSpan={5}>No member contribution records yet.</td>
                       </tr>
                     )}
                   </tbody>
@@ -3716,6 +3802,76 @@ function Metric({
       <b>{value}</b>
       <small>{note}</small>
     </article>
+  );
+}
+// A name field that is picked from the farm's own names instead of typed, with
+// a way out for a name nobody has used yet.
+const newNameOption = "__new_name__";
+function HolderSelect({
+  name,
+  label,
+  options,
+  words,
+  defaultValue = "",
+  required = false,
+  placeholder,
+}: {
+  name: string;
+  label: string;
+  options: string[];
+  words: (typeof commonText)[Language];
+  defaultValue?: string;
+  required?: boolean;
+  placeholder?: string;
+}) {
+  // A saved record can name someone who has since been removed from the list.
+  const listed =
+    defaultValue && !options.includes(defaultValue)
+      ? [defaultValue, ...options]
+      : options;
+  // Null while picking from the list; a string once the member is typing one
+  // in, so choosing "new name" starts from an empty field.
+  const [typed, setTyped] = useState<string | null>(
+    listed.length ? null : defaultValue,
+  );
+  return (
+    <label>
+      {label}
+      {typed !== null ? (
+        <input
+          name={name}
+          required={required}
+          defaultValue={typed}
+          placeholder={placeholder}
+        />
+      ) : (
+        <select
+          name={name}
+          required={required}
+          defaultValue={defaultValue}
+          onChange={(event) => {
+            if (event.target.value === newNameOption) setTyped("");
+          }}
+        >
+          <option value="">{required ? words.selectHolder : "—"}</option>
+          {listed.map((holder) => (
+            <option key={holder} value={holder}>
+              {holder}
+            </option>
+          ))}
+          <option value={newNameOption}>{words.newName}</option>
+        </select>
+      )}
+      {typed !== null && listed.length > 0 && (
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => setTyped(null)}
+        >
+          {words.chooseFromList}
+        </button>
+      )}
+    </label>
   );
 }
 function SectionTitle({ title, detail }: { title: string; detail: string }) {
