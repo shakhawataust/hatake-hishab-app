@@ -368,6 +368,25 @@ const expenseCategories = [
   "Rent / ভাড়া",
   "Other / অন্যান্য",
 ];
+const taskTypes = [
+  "Fertilizer",
+  "Insect medicine",
+  "Watering",
+  "Weeding",
+  "Crop check",
+  "Harvest",
+  "Other",
+];
+const batchStages = [
+  "Planned",
+  "Seedling",
+  "Planted",
+  "Vegetative",
+  "Flowering",
+  "Fruiting",
+  "Harvesting",
+  "Finished",
+];
 const laborCategory = "Labor / Travel";
 const unknownHolder = "Not recorded";
 const careAlertsKey = "hatake-hishab-care-alerts";
@@ -482,6 +501,8 @@ export default function Home() {
   const [investmentsReady, setInvestmentsReady] = useState(false);
   const [reportMonth, setReportMonth] = useState(today().slice(0, 7));
   const [editing, setEditing] = useState<Entry | null>(null);
+  const [editingBatch, setEditingBatch] = useState<CropBatch | null>(null);
+  const [editingTask, setEditingTask] = useState<CropTask | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -784,67 +805,40 @@ export default function Home() {
     if (!result.error) await loadWorkspace();
   }
 
-  async function editBatch(batch: CropBatch) {
-    if (!supabase) return;
-    const stage = window.prompt("Current stage", batch.stage);
-    if (stage === null) return;
-    const expected = window.prompt(
-      "Expected harvest date (YYYY-MM-DD)",
-      batch.expected_harvest_on ?? "",
-    );
-    if (expected === null) return;
-    setBusy(true);
-    const result = await supabase
-      .from("crop_batches")
-      .update({
-        stage: stage.trim() || batch.stage,
-        expected_harvest_on: expected.trim() || null,
-      })
-      .eq("id", batch.id);
-    setBusy(false);
-    setNotice(result.error ? result.error.message : "Crop batch updated.");
-    if (!result.error) await loadWorkspace();
-  }
-
   async function saveCropTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase || !farm) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     setBusy(true);
-    const result = await supabase.from("crop_tasks").insert({
-      farm_id: farm.id,
+    const details = {
       batch_id: String(form.get("batch_id")),
       task_type: String(form.get("task_type")),
       due_on: String(form.get("due_on")),
       responsible_member: String(form.get("responsible_member")) || null,
       instruction: String(form.get("instruction")) || null,
-    });
+    };
+    const result = editingTask
+      ? await supabase
+          .from("crop_tasks")
+          .update(details)
+          .eq("id", editingTask.id)
+      : await supabase
+          .from("crop_tasks")
+          .insert({ farm_id: farm.id, ...details });
     setBusy(false);
-    setNotice(result.error ? result.error.message : "Farm task added.");
+    setNotice(
+      result.error
+        ? result.error.message
+        : editingTask
+          ? "Farm task updated."
+          : "Farm task added.",
+    );
     if (!result.error) {
       formElement.reset();
+      setEditingTask(null);
       await loadWorkspace();
     }
-  }
-
-  async function updateCropTask(task: CropTask) {
-    if (!supabase) return;
-    const dueOn = window.prompt("Due date (YYYY-MM-DD)", task.due_on);
-    if (dueOn === null) return;
-    const instruction = window.prompt("Instruction", task.instruction ?? "");
-    if (instruction === null) return;
-    setBusy(true);
-    const result = await supabase
-      .from("crop_tasks")
-      .update({
-        due_on: dueOn || task.due_on,
-        instruction: instruction || null,
-      })
-      .eq("id", task.id);
-    setBusy(false);
-    setNotice(result.error ? result.error.message : "Farm task updated.");
-    if (!result.error) await loadWorkspace();
   }
 
   async function completeCropTask(task: CropTask) {
@@ -922,22 +916,45 @@ export default function Home() {
     const expectedHarvestOn =
       String(form.get("expected_harvest_on")) ||
       expectedHarvest.toISOString().slice(0, 10);
+    const details = {
+      crop,
+      stage: String(form.get("stage")),
+      planted_on: plantedOn || null,
+      variety: String(form.get("variety")) || null,
+      bed,
+      area: String(form.get("area")) ? Number(form.get("area")) : null,
+      plants: String(form.get("plants")) ? Number(form.get("plants")) : null,
+      expected_harvest_on: expectedHarvestOn,
+      responsible_member: String(form.get("responsible_member")) || null,
+      note: String(form.get("note")) || null,
+    };
     setBusy(true);
+    if (editingBatch) {
+      // The code is printed on expense and labor notes, so it stays fixed, and
+      // the generated schedule is left alone rather than duplicated.
+      const update = await supabase
+        .from("crop_batches")
+        .update({
+          ...details,
+          // A cleared date means cleared, not recalculated from the heuristic.
+          expected_harvest_on: String(form.get("expected_harvest_on")) || null,
+        })
+        .eq("id", editingBatch.id);
+      setBusy(false);
+      setNotice(update.error ? update.error.message : "Crop batch updated.");
+      if (!update.error) {
+        formElement.reset();
+        setEditingBatch(null);
+        await loadWorkspace();
+      }
+      return;
+    }
     const result = await supabase
       .from("crop_batches")
       .insert({
         farm_id: farm.id,
         code,
-        crop,
-        stage: String(form.get("stage")),
-        planted_on: plantedOn || null,
-        variety: String(form.get("variety")) || null,
-        bed,
-        area: String(form.get("area")) ? Number(form.get("area")) : null,
-        plants: String(form.get("plants")) ? Number(form.get("plants")) : null,
-        expected_harvest_on: expectedHarvestOn,
-        responsible_member: String(form.get("responsible_member")) || null,
-        note: String(form.get("note")) || null,
+        ...details,
         created_by: sessionData.session?.user.id,
       })
       .select("id")
@@ -1241,14 +1258,24 @@ export default function Home() {
     ...monthly.flatMap((month) => [month.sales, month.expense]),
   );
   const editField = (label: string) => noteValue(editing?.note, label);
-  // An old row may hold a crop or category that is no longer in the list, so
+  // A saved row may hold a crop or category that is no longer in the list, so
   // keep it selectable instead of silently changing it.
+  const withOption = (options: readonly string[], value?: string | null) =>
+    value && !options.includes(value) ? [value, ...options] : [...options];
   const cropOptions = (options: readonly string[]) =>
-    editing?.crop && !options.includes(editing.crop)
-      ? [editing.crop, ...options]
-      : [...options];
+    withOption(options, editing?.crop);
   // The note keeps the rate as "￥1,000/h"; the form needs a plain number.
   const editedRate = Number(editField("Rate").replace(/[^\d.]/g, "")) || 0;
+  const startTaskEdit = (task: CropTask) => {
+    setEditingTask(task);
+    setNotice(`Editing the ${task.task_type} task.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const startBatchEdit = (batch: CropBatch) => {
+    setEditingBatch(batch);
+    setNotice(`Editing batch ${batch.code}.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const startEdit = (entry: Entry) => {
     setEditing(entry);
     setNotice("Editing a saved record.");
@@ -1529,6 +1556,8 @@ export default function Home() {
   const common = commonText[language];
   const changeView = (next: View) => {
     setEditing(null);
+    setEditingBatch(null);
+    setEditingTask(null);
     setNotice("");
     setView(next);
   };
@@ -2376,67 +2405,116 @@ export default function Home() {
             <article className="finance-card entry-card">
               <SectionTitle
                 title={labels[language].batches}
-                detail="Planting and growth tracking"
+                detail={
+                  editingBatch
+                    ? `Editing ${editingBatch.code}`
+                    : "Planting and growth tracking"
+                }
               />
-              <form className="finance-form" onSubmit={saveBatch}>
+              <form
+                className="finance-form"
+                onSubmit={saveBatch}
+                key={editingBatch?.id ?? "new"}
+              >
+                {editingBatch && (
+                  <p className="small-pro full">
+                    Editing <b>{editingBatch.code}</b>. The batch code and its
+                    planned tasks stay as they are.
+                  </p>
+                )}
                 <label>
                   {common.crop}
-                  <select name="crop" required defaultValue="">
+                  <select
+                    name="crop"
+                    required
+                    defaultValue={editingBatch?.crop ?? ""}
+                  >
                     <option value="" disabled>
                       Select crop
                     </option>
-                    {crops.map((crop) => (
+                    {withOption(crops, editingBatch?.crop).map((crop) => (
                       <option key={crop}>{crop}</option>
                     ))}
                   </select>
                 </label>
                 <label>
                   Variety / 品種
-                  <input name="variety" placeholder="Optional variety name" />
+                  <input
+                    name="variety"
+                    placeholder="Optional variety name"
+                    defaultValue={editingBatch?.variety ?? ""}
+                  />
                 </label>
                 <label>
                   Field / Bed
-                  <input name="bed" required placeholder="A1 / North-02" />
+                  <input
+                    name="bed"
+                    required
+                    placeholder="A1 / North-02"
+                    defaultValue={editingBatch?.bed ?? ""}
+                  />
                 </label>
                 <label>
                   Planted / Transplanted date
                   <input
                     name="planted_on"
                     type="date"
-                    defaultValue={today()}
+                    defaultValue={editingBatch?.planted_on ?? today()}
                     required
                   />
                 </label>
                 <label>
                   Expected harvest date
-                  <input name="expected_harvest_on" type="date" />
+                  <input
+                    name="expected_harvest_on"
+                    type="date"
+                    defaultValue={editingBatch?.expected_harvest_on ?? ""}
+                  />
                 </label>
                 <label>
                   Area (㎡)
-                  <input name="area" type="number" min="0" step="0.1" />
+                  <input
+                    name="area"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    defaultValue={editingBatch?.area ?? ""}
+                  />
                 </label>
                 <label>
                   Plants / rows
-                  <input name="plants" type="number" min="0" />
+                  <input
+                    name="plants"
+                    type="number"
+                    min="0"
+                    defaultValue={editingBatch?.plants ?? ""}
+                  />
                 </label>
                 <label>
                   Responsible member
                   <input
                     name="responsible_member"
                     placeholder="Rafi / Ishtiaq / Farhan"
+                    list="known-holders"
+                    defaultValue={editingBatch?.responsible_member ?? ""}
                   />
+                  <datalist id="known-holders">
+                    {knownHolders.map((holder) => (
+                      <option key={holder} value={holder} />
+                    ))}
+                  </datalist>
                 </label>
                 <label>
                   Current stage
-                  <select name="stage" defaultValue="Planted">
-                    <option>Planned</option>
-                    <option>Seedling</option>
-                    <option>Planted</option>
-                    <option>Vegetative</option>
-                    <option>Flowering</option>
-                    <option>Fruiting</option>
-                    <option>Harvesting</option>
-                    <option>Finished</option>
+                  <select
+                    name="stage"
+                    defaultValue={editingBatch?.stage ?? "Planted"}
+                  >
+                    {withOption(batchStages, editingBatch?.stage).map(
+                      (stage) => (
+                        <option key={stage}>{stage}</option>
+                      ),
+                    )}
                   </select>
                 </label>
                 <label className="full">
@@ -2444,11 +2522,23 @@ export default function Home() {
                   <input
                     name="note"
                     placeholder="Mulch, trellis, seed source, special condition…"
+                    defaultValue={editingBatch?.note ?? ""}
                   />
                 </label>
                 <button className="finance-button full" disabled={busy}>
-                  Create batch + generate schedule
+                  {editingBatch
+                    ? "Update batch"
+                    : "Create batch + generate schedule"}
                 </button>
+                {editingBatch && (
+                  <button
+                    type="button"
+                    className="finance-button secondary full"
+                    onClick={() => setEditingBatch(null)}
+                  >
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </article>
             <article className="finance-card planner-guide">
@@ -2488,14 +2578,22 @@ export default function Home() {
             </article>
             <article className="finance-card entry-card">
               <SectionTitle
-                title="Add Custom Farm Task"
-                detail="For exceptional work"
+                title={editingTask ? "Edit Farm Task" : "Add Custom Farm Task"}
+                detail={editingTask ? "Saved task" : "For exceptional work"}
               />
               {batches.length ? (
-                <form className="finance-form" onSubmit={saveCropTask}>
+                <form
+                  className="finance-form"
+                  onSubmit={saveCropTask}
+                  key={editingTask?.id ?? "new"}
+                >
                   <label>
                     Batch
-                    <select name="batch_id" required defaultValue="">
+                    <select
+                      name="batch_id"
+                      required
+                      defaultValue={editingTask?.batch_id ?? ""}
+                    >
                       <option value="" disabled>
                         Select batch
                       </option>
@@ -2508,14 +2606,15 @@ export default function Home() {
                   </label>
                   <label>
                     Task type
-                    <select name="task_type" defaultValue="Fertilizer">
-                      <option>Fertilizer</option>
-                      <option>Insect medicine</option>
-                      <option>Watering</option>
-                      <option>Weeding</option>
-                      <option>Crop check</option>
-                      <option>Harvest</option>
-                      <option>Other</option>
+                    <select
+                      name="task_type"
+                      defaultValue={editingTask?.task_type ?? "Fertilizer"}
+                    >
+                      {withOption(taskTypes, editingTask?.task_type).map(
+                        (type) => (
+                          <option key={type}>{type}</option>
+                        ),
+                      )}
                     </select>
                   </label>
                   <label>
@@ -2523,24 +2622,39 @@ export default function Home() {
                     <input
                       name="due_on"
                       type="date"
-                      defaultValue={today()}
+                      defaultValue={editingTask?.due_on ?? today()}
                       required
                     />
                   </label>
                   <label>
                     Responsible
-                    <input name="responsible_member" placeholder="Hossain" />
+                    <input
+                      name="responsible_member"
+                      placeholder="Hossain"
+                      list="known-holders"
+                      defaultValue={editingTask?.responsible_member ?? ""}
+                    />
                   </label>
                   <label className="full">
                     Instruction
                     <input
                       name="instruction"
                       placeholder="What exactly should be done?"
+                      defaultValue={editingTask?.instruction ?? ""}
                     />
                   </label>
                   <button className="finance-button" disabled={busy}>
-                    Add task
+                    {editingTask ? "Update task" : "Add task"}
                   </button>
+                  {editingTask && (
+                    <button
+                      type="button"
+                      className="finance-button secondary"
+                      onClick={() => setEditingTask(null)}
+                    >
+                      Cancel edit
+                    </button>
+                  )}
                 </form>
               ) : (
                 <p className="small-pro">
@@ -2589,9 +2703,11 @@ export default function Home() {
                                 type="button"
                                 className="table-edit"
                                 disabled={busy}
-                                onClick={() => void updateCropTask(task)}
+                                onClick={() => startTaskEdit(task)}
                               >
-                                Edit
+                                {editingTask?.id === task.id
+                                  ? "Editing…"
+                                  : "Edit"}
                               </button>
                               <button
                                 type="button"
@@ -2634,45 +2750,70 @@ export default function Home() {
                       <th>Batch</th>
                       <th>{common.crop}</th>
                       <th>{common.status}</th>
+                      <th>Planted</th>
                       <th>Expected harvest</th>
+                      <th>Field · member</th>
+                      <th>Tasks open</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {batches.length ? (
-                      batches.map((batch) => (
-                        <tr key={batch.id}>
-                          <td>{batch.code}</td>
-                          <td>{batch.crop}</td>
-                          <td>
-                            <span className="entry-badge harvest">
-                              {batch.stage}
-                            </span>
-                          </td>
-                          <td>{batch.expected_harvest_on || "—"}</td>
-                          <td className="table-actions">
-                            <button
-                              type="button"
-                              className="table-edit"
-                              disabled={busy}
-                              onClick={() => void editBatch(batch)}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              className="table-delete"
-                              disabled={busy}
-                              onClick={() => void deleteBatch(batch.id)}
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      batches.map((batch) => {
+                        const openTasks = cropTasks.filter(
+                          (task) =>
+                            task.batch_id === batch.id && !task.completed,
+                        ).length;
+                        return (
+                          <tr key={batch.id}>
+                            <td>
+                              <b>{batch.code}</b>
+                            </td>
+                            <td>
+                              {batch.crop}
+                              {batch.variety ? ` · ${batch.variety}` : ""}
+                            </td>
+                            <td>
+                              <span className="entry-badge harvest">
+                                {batch.stage}
+                              </span>
+                            </td>
+                            <td>{batch.planted_on || "—"}</td>
+                            <td>{batch.expected_harvest_on || "—"}</td>
+                            <td>
+                              {[batch.bed, batch.responsible_member]
+                                .filter(Boolean)
+                                .join(" · ") || "—"}
+                            </td>
+                            <td>{openTasks || "—"}</td>
+                            <td>
+                              <div className="table-actions">
+                                <button
+                                  type="button"
+                                  className="table-edit"
+                                  disabled={busy}
+                                  onClick={() => startBatchEdit(batch)}
+                                >
+                                  {editingBatch?.id === batch.id
+                                    ? "Editing…"
+                                    : "Edit"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-delete"
+                                  disabled={busy}
+                                  onClick={() => void deleteBatch(batch.id)}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
                     ) : (
                       <tr>
-                        <td colSpan={5}>No crop batches yet.</td>
+                        <td colSpan={8}>No crop batches yet.</td>
                       </tr>
                     )}
                   </tbody>
