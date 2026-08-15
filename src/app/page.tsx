@@ -369,6 +369,7 @@ const expenseCategories = [
   "Other / অন্যান্য",
 ];
 const laborCategory = "Labor / Travel";
+const unknownHolder = "Not recorded";
 const careAlertsKey = "hatake-hishab-care-alerts";
 const investmentsKey = "hatake-hishab-investments";
 
@@ -378,6 +379,9 @@ const yen = (value: number) =>
     currency: "JPY",
     maximumFractionDigits: 0,
   }).format(value);
+// Notes are stored as "Label: value | Label: value", so read one label back.
+const noteValue = (note: string | null | undefined, label: string) =>
+  note?.match(new RegExp(`${label}:\\s*([^|]+)`, "i"))?.[1].trim() ?? "";
 const transportFromNote = (note?: string | null) => {
   const match = note?.match(/Transport:\s*[¥￥]?\s*([\d,]+)/i)?.[1];
   return Number((match ?? "0").replaceAll(",", "")) || 0;
@@ -651,6 +655,9 @@ export default function Home() {
       form.get("customer") ? `Customer: ${form.get("customer")}` : "",
       form.get("channel") ? `Channel: ${form.get("channel")}` : "",
       form.get("payment") ? `Payment: ${form.get("payment")}` : "",
+      form.get("cash_with")
+        ? `Cash with: ${String(form.get("cash_with")).trim()}`
+        : "",
       form.get("paid_by") ? `Paid by: ${form.get("paid_by")}` : "",
       form.get("sellable") ? `Sellable: ${form.get("sellable")}` : "",
       form.get("waste") ? `Waste: ${form.get("waste")}` : "",
@@ -1189,6 +1196,45 @@ export default function Home() {
     1,
     ...monthly.flatMap((month) => [month.sales, month.expense]),
   );
+  const paidSales = entries.filter(
+    (entry) =>
+      entry.kind === "sale" && /Payment:\s*Paid/i.test(entry.note ?? ""),
+  );
+  // Who is carrying the money from each paid sale.
+  const cashInHand = [
+    ...paidSales
+      .reduce((all, entry) => {
+        const holder = noteValue(entry.note, "Cash with") || unknownHolder;
+        all.set(holder, (all.get(holder) ?? 0) + Number(entry.amount ?? 0));
+        return all;
+      }, new Map<string, number>())
+      .entries(),
+  ].sort((a, b) => b[1] - a[1]);
+  const pendingSales = entries
+    .filter(
+      (entry) =>
+        entry.kind === "sale" && /Payment:\s*Pending/i.test(entry.note ?? ""),
+    )
+    .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
+  // Older rows carry no Payment tag; show them so the panel still adds up.
+  const untaggedSales = entries
+    .filter(
+      (entry) =>
+        entry.kind === "sale" && !/Payment:\s*\w/i.test(entry.note ?? ""),
+    )
+    .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
+  // Names already used anywhere, so the field can be filled with one tap.
+  const knownHolders = [
+    ...new Set(
+      entries
+        .flatMap((entry) => [
+          noteValue(entry.note, "Cash with"),
+          noteValue(entry.note, "Paid by"),
+          noteValue(entry.note, "Member"),
+        ])
+        .filter(Boolean),
+    ),
+  ].sort();
 
   if (!supabase)
     return (
@@ -1873,6 +1919,23 @@ export default function Home() {
                         <option>Pending</option>
                       </select>
                     </label>
+                    <label>
+                      {language === "bn"
+                        ? "টাকা কার কাছে"
+                        : language === "ja"
+                          ? "代金の保管者"
+                          : "Cash with"}
+                      <input
+                        name="cash_with"
+                        list="known-holders"
+                        placeholder="Shakhawat / Rafi"
+                      />
+                      <datalist id="known-holders">
+                        {knownHolders.map((holder) => (
+                          <option key={holder} value={holder} />
+                        ))}
+                      </datalist>
+                    </label>
                   </>
                 )}
                 {view === "harvest" && (
@@ -1903,6 +1966,44 @@ export default function Home() {
                   {common.save}
                 </button>
               </form>
+              {view === "sales" && (
+                <>
+                  <SectionTitle
+                    title={
+                      language === "bn"
+                        ? "টাকা কার কাছে আছে"
+                        : language === "ja"
+                          ? "現金の保管者"
+                          : "Cash in hand"
+                    }
+                    detail="Paid sales"
+                  />
+                  <div className="summary-list">
+                    {cashInHand.length ? (
+                      cashInHand.map(([holder, amount]) => (
+                        <p key={holder}>
+                          <span>{holder}</span>
+                          <b>{yen(amount)}</b>
+                        </p>
+                      ))
+                    ) : (
+                      <p className="empty-copy">No paid sales yet.</p>
+                    )}
+                    {pendingSales > 0 && (
+                      <p>
+                        <span>Not collected yet (Pending)</span>
+                        <b>{yen(pendingSales)}</b>
+                      </p>
+                    )}
+                    {untaggedSales > 0 && (
+                      <p>
+                        <span>Older sales without payment status</span>
+                        <b>{yen(untaggedSales)}</b>
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
             </article>
             <article className="finance-card">
               <SectionTitle
