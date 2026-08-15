@@ -731,9 +731,7 @@ export default function Home() {
     const member = String(form.get("member")).trim();
     const task = String(form.get("task")).trim();
     setBusy(true);
-    const result = await supabase.from("transactions").insert({
-      farm_id: farm.id,
-      created_by: sessionData.session?.user.id,
+    const record = {
       kind: "labor",
       occurred_on: form.get("date"),
       crop: String(form.get("crop")) || null,
@@ -741,13 +739,25 @@ export default function Home() {
       quantity: hours,
       unit: "hours",
       note: `Member: ${member} | Task: ${task || "—"} | Rate: ${yen(rate)}/h | Transport: ${yen(transport)}`,
-    });
+    };
+    const result = editing
+      ? await supabase.from("transactions").update(record).eq("id", editing.id)
+      : await supabase.from("transactions").insert({
+          ...record,
+          farm_id: farm.id,
+          created_by: sessionData.session?.user.id,
+        });
     setBusy(false);
     setNotice(
-      result.error ? result.error.message : "Labor and travel record saved.",
+      result.error
+        ? result.error.message
+        : editing
+          ? "Labor and travel record updated."
+          : "Labor and travel record saved.",
     );
     if (!result.error) {
       formElement.reset();
+      setEditing(null);
       await loadWorkspace();
     }
   }
@@ -1237,6 +1247,8 @@ export default function Home() {
     editing?.crop && !options.includes(editing.crop)
       ? [editing.crop, ...options]
       : [...options];
+  // The note keeps the rate as "￥1,000/h"; the form needs a plain number.
+  const editedRate = Number(editField("Rate").replace(/[^\d.]/g, "")) || 0;
   const startEdit = (entry: Entry) => {
     setEditing(entry);
     setNotice("Editing a saved record.");
@@ -2165,13 +2177,17 @@ export default function Home() {
           <section className="entry-page">
             <article className="finance-card entry-card">
               <SectionTitle title={labor.title} detail={labor.detail} />
-              <form className="finance-form" onSubmit={saveLabor}>
+              <form
+                className="finance-form"
+                onSubmit={saveLabor}
+                key={editing?.id ?? "new"}
+              >
                 <label>
                   {labor.date}
                   <input
                     name="date"
                     type="date"
-                    defaultValue={today()}
+                    defaultValue={editing?.occurred_on ?? today()}
                     required
                   />
                 </label>
@@ -2180,12 +2196,19 @@ export default function Home() {
                   <input
                     name="member"
                     required
+                    list="known-holders"
+                    defaultValue={editField("Member")}
                     placeholder={
                       language === "ja"
                         ? "ラフィ / イスティアク / ファルハン"
                         : "Rafi / Ishtiaq / Farhan"
                     }
                   />
+                  <datalist id="known-holders">
+                    {knownHolders.map((holder) => (
+                      <option key={holder} value={holder} />
+                    ))}
+                  </datalist>
                 </label>
                 <label>
                   {labor.hours}
@@ -2196,11 +2219,17 @@ export default function Home() {
                     step="0.25"
                     required
                     placeholder="5"
+                    defaultValue={editing?.quantity ?? ""}
                   />
                 </label>
                 <label>
                   {labor.rate}
-                  <input name="rate" type="number" min="0" defaultValue="0" />
+                  <input
+                    name="rate"
+                    type="number"
+                    min="0"
+                    defaultValue={editing ? editedRate : "0"}
+                  />
                 </label>
                 <label>
                   {labor.transport}
@@ -2208,12 +2237,14 @@ export default function Home() {
                     name="transport"
                     type="number"
                     min="0"
-                    defaultValue="0"
+                    defaultValue={
+                      editing ? transportFromNote(editing.note) : "0"
+                    }
                   />
                 </label>
                 <label>
                   {labor.crop}
-                  <select name="crop" defaultValue="">
+                  <select name="crop" defaultValue={editing?.crop ?? ""}>
                     <option value="">
                       {language === "ja"
                         ? "一般"
@@ -2221,7 +2252,7 @@ export default function Home() {
                           ? "সাধারণ"
                           : "General"}
                     </option>
-                    {crops.map((crop) => (
+                    {cropOptions(crops).map((crop) => (
                       <option key={crop}>{crop}</option>
                     ))}
                   </select>
@@ -2230,6 +2261,7 @@ export default function Home() {
                   {labor.task}
                   <input
                     name="task"
+                    defaultValue={editField("Task")}
                     placeholder={
                       language === "ja"
                         ? "除草 / 植え付け / 収穫 / 配送"
@@ -2240,8 +2272,17 @@ export default function Home() {
                   />
                 </label>
                 <button className="finance-button full" disabled={busy}>
-                  {labor.save}
+                  {editing ? "Update record" : labor.save}
                 </button>
+                {editing && (
+                  <button
+                    type="button"
+                    className="finance-button secondary full"
+                    onClick={() => setEditing(null)}
+                  >
+                    Cancel edit
+                  </button>
+                )}
               </form>
             </article>
             <article className="finance-card">
@@ -2277,13 +2318,22 @@ export default function Home() {
                           <td>{yen(Number(entry.amount ?? 0))}</td>
                           <td>{entry.note || "—"}</td>
                           <td>
-                            <button
-                              className="table-delete"
-                              disabled={busy}
-                              onClick={() => void deleteEntry(entry.id)}
-                            >
-                              {labor.remove}
-                            </button>
+                            <div className="table-actions">
+                              <button
+                                className="table-edit"
+                                disabled={busy}
+                                onClick={() => startEdit(entry)}
+                              >
+                                {editing?.id === entry.id ? "Editing…" : "Edit"}
+                              </button>
+                              <button
+                                className="table-delete"
+                                disabled={busy}
+                                onClick={() => void deleteEntry(entry.id)}
+                              >
+                                {labor.remove}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
