@@ -382,6 +382,27 @@ const yen = (value: number) =>
 // Notes are stored as "Label: value | Label: value", so read one label back.
 const noteValue = (note: string | null | undefined, label: string) =>
   note?.match(new RegExp(`${label}:\\s*([^|]+)`, "i"))?.[1].trim() ?? "";
+const noteLabels = [
+  "Customer",
+  "Channel",
+  "Payment",
+  "Cash with",
+  "Paid by",
+  "Sellable",
+  "Waste",
+];
+// Whatever the member typed themselves, without the labelled parts the form
+// rebuilds on save.
+const freeNote = (note: string | null | undefined) =>
+  (note ?? "")
+    .split("|")
+    .map((part) => part.trim())
+    .filter(
+      (part) =>
+        part &&
+        !noteLabels.some((label) => new RegExp(`^${label}:`, "i").test(part)),
+    )
+    .join(" | ");
 const transportFromNote = (note?: string | null) => {
   const match = note?.match(/Transport:\s*[¥￥]?\s*([\d,]+)/i)?.[1];
   return Number((match ?? "0").replaceAll(",", "")) || 0;
@@ -460,6 +481,7 @@ export default function Home() {
   const [alertsReady, setAlertsReady] = useState(false);
   const [investmentsReady, setInvestmentsReady] = useState(false);
   const [reportMonth, setReportMonth] = useState(today().slice(0, 7));
+  const [editing, setEditing] = useState<Entry | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -666,9 +688,7 @@ export default function Home() {
       .filter(Boolean)
       .join(" | ");
     setBusy(true);
-    const result = await supabase.from("transactions").insert({
-      farm_id: farm.id,
-      created_by: sessionData.session?.user.id,
+    const record = {
       kind: form.get("kind"),
       occurred_on: form.get("date"),
       crop: String(form.get("crop")) || null,
@@ -676,11 +696,25 @@ export default function Home() {
       quantity: quantity ? Number(quantity) : null,
       unit: String(form.get("unit")) || null,
       note: note || null,
-    });
+    };
+    const result = editing
+      ? await supabase.from("transactions").update(record).eq("id", editing.id)
+      : await supabase.from("transactions").insert({
+          ...record,
+          farm_id: farm.id,
+          created_by: sessionData.session?.user.id,
+        });
     setBusy(false);
-    setNotice(result.error ? result.error.message : "Record saved.");
+    setNotice(
+      result.error
+        ? result.error.message
+        : editing
+          ? "Record updated."
+          : "Record saved.",
+    );
     if (!result.error) {
       formElement.reset();
+      setEditing(null);
       await loadWorkspace();
     }
   }
@@ -1196,20 +1230,54 @@ export default function Home() {
     1,
     ...monthly.flatMap((month) => [month.sales, month.expense]),
   );
+  const editField = (label: string) => noteValue(editing?.note, label);
+  // An old row may hold a crop or category that is no longer in the list, so
+  // keep it selectable instead of silently changing it.
+  const cropOptions = (options: readonly string[]) =>
+    editing?.crop && !options.includes(editing.crop)
+      ? [editing.crop, ...options]
+      : [...options];
+  const startEdit = (entry: Entry) => {
+    setEditing(entry);
+    setNotice("Editing a saved record.");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const paidSales = entries.filter(
     (entry) =>
       entry.kind === "sale" && /Payment:\s*Paid/i.test(entry.note ?? ""),
   );
-  // Who is carrying the money from each paid sale.
-  const cashInHand = [
-    ...paidSales
-      .reduce((all, entry) => {
-        const holder = noteValue(entry.note, "Cash with") || unknownHolder;
-        all.set(holder, (all.get(holder) ?? 0) + Number(entry.amount ?? 0));
-        return all;
-      }, new Map<string, number>())
-      .entries(),
-  ].sort((a, b) => b[1] - a[1]);
+  // Cash each person is carrying: money they collected from paid sales, less
+  // whatever they have already spent on farm expenses.
+  const cashInHand = (() => {
+    const people = new Map<string, { collected: number; spent: number }>();
+    const person = (name: string) => {
+      if (!people.has(name)) people.set(name, { collected: 0, spent: 0 });
+      return people.get(name)!;
+    };
+    paidSales.forEach((entry) => {
+      person(noteValue(entry.note, "Cash with") || unknownHolder).collected +=
+        Number(entry.amount ?? 0);
+    });
+    entries
+      .filter((entry) => entry.kind === "expense")
+      .forEach((entry) => {
+        const payer = noteValue(entry.note, "Paid by");
+        // No payer recorded means we cannot say whose cash it came out of.
+        if (payer) person(payer).spent += Number(entry.amount ?? 0);
+      });
+    return [...people.entries()]
+      .map(([name, totals]) => ({
+        name,
+        ...totals,
+        balance: totals.collected - totals.spent,
+      }))
+      .sort((a, b) => b.balance - a.balance);
+  })();
+  const untrackedSpend = entries
+    .filter(
+      (entry) => entry.kind === "expense" && !noteValue(entry.note, "Paid by"),
+    )
+    .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
   const pendingSales = entries
     .filter(
       (entry) =>
@@ -1447,6 +1515,11 @@ export default function Home() {
   const text = interfaceText[language];
   const labor = laborText[language];
   const common = commonText[language];
+  const changeView = (next: View) => {
+    setEditing(null);
+    setNotice("");
+    setView(next);
+  };
   const changeLanguage = (next: Language) => {
     setLanguage(next);
     window.localStorage.setItem("hatake-hishab-language", next);
@@ -1472,7 +1545,7 @@ export default function Home() {
             <button
               key={item.id}
               className={view === item.id ? "active" : ""}
-              onClick={() => setView(item.id)}
+              onClick={() => changeView(item.id)}
             >
               <span>{item.icon}</span>
               {labels[language][item.id]}
@@ -1508,7 +1581,7 @@ export default function Home() {
             </button>
             <button
               className="finance-button"
-              onClick={() => setView("expense")}
+              onClick={() => changeView("expense")}
             >
               {text.expense}
             </button>
@@ -1816,21 +1889,29 @@ export default function Home() {
                       : "Expense + payment details"
                 }
               />
-              <form className="finance-form" onSubmit={saveEntry}>
+              <form
+                className="finance-form"
+                onSubmit={saveEntry}
+                key={editing?.id ?? "new"}
+              >
                 <input type="hidden" name="kind" value={selectedKind} />
                 <label>
                   {common.date}
                   <input
                     name="date"
                     type="date"
-                    defaultValue={today()}
+                    defaultValue={editing?.occurred_on ?? today()}
                     required
                   />
                 </label>
                 <label>
                   {view === "expense" ? common.category : common.crop}
                   {view === "expense" ? (
-                    <select name="crop" required defaultValue="">
+                    <select
+                      name="crop"
+                      required
+                      defaultValue={editing?.crop ?? ""}
+                    >
                       <option value="" disabled>
                         {language === "ja"
                           ? "カテゴリーを選択"
@@ -1838,12 +1919,16 @@ export default function Home() {
                             ? "বিভাগ নির্বাচন করুন"
                             : "Select category"}
                       </option>
-                      {expenseCategories.map((category) => (
+                      {cropOptions(expenseCategories).map((category) => (
                         <option key={category}>{category}</option>
                       ))}
                     </select>
                   ) : (
-                    <select name="crop" required defaultValue="">
+                    <select
+                      name="crop"
+                      required
+                      defaultValue={editing?.crop ?? ""}
+                    >
                       <option value="" disabled>
                         {language === "ja"
                           ? "作物を選択"
@@ -1851,7 +1936,7 @@ export default function Home() {
                             ? "ফসল নির্বাচন করুন"
                             : "Select crop"}
                       </option>
-                      {crops.map((crop) => (
+                      {cropOptions(crops).map((crop) => (
                         <option key={crop} value={crop}>
                           {crop}
                         </option>
@@ -1868,6 +1953,7 @@ export default function Home() {
                     type="number"
                     min="0"
                     required={view !== "harvest"}
+                    defaultValue={editing?.amount ?? ""}
                   />
                 </label>
                 <label>
@@ -1880,16 +1966,31 @@ export default function Home() {
                     step="0.01"
                     min="0"
                     required={view === "sales" || view === "harvest"}
+                    defaultValue={editing?.quantity ?? ""}
                   />
                 </label>
                 <label>
                   {common.unit}
-                  <input name="unit" placeholder="kg / pcs / hours" />
+                  <input
+                    name="unit"
+                    placeholder="kg / pcs / hours"
+                    defaultValue={editing?.unit ?? ""}
+                  />
                 </label>
                 {view === "expense" && (
                   <label>
                     Paid by
-                    <input name="paid_by" placeholder="Hossain / Rafi" />
+                    <input
+                      name="paid_by"
+                      placeholder="Hossain / Rafi"
+                      list="known-holders"
+                      defaultValue={editField("Paid by")}
+                    />
+                    <datalist id="known-holders">
+                      {knownHolders.map((holder) => (
+                        <option key={holder} value={holder} />
+                      ))}
+                    </datalist>
                   </label>
                 )}
                 {view === "sales" && (
@@ -1899,11 +2000,16 @@ export default function Home() {
                       <input
                         name="customer"
                         placeholder="Community / Restaurant"
+                        defaultValue={editField("Customer")}
                       />
                     </label>
                     <label>
                       Channel
-                      <select name="channel" defaultValue="Direct">
+                      <select
+                        name="channel"
+                        defaultValue={editing ? editField("Channel") : "Direct"}
+                      >
+                        <option value="">—</option>
                         <option>Community</option>
                         <option>WhatsApp</option>
                         <option>Facebook</option>
@@ -1914,7 +2020,11 @@ export default function Home() {
                     </label>
                     <label>
                       Payment
-                      <select name="payment" defaultValue="Paid">
+                      <select
+                        name="payment"
+                        defaultValue={editing ? editField("Payment") : "Paid"}
+                      >
+                        <option value="">—</option>
                         <option>Paid</option>
                         <option>Pending</option>
                       </select>
@@ -1929,6 +2039,7 @@ export default function Home() {
                         name="cash_with"
                         list="known-holders"
                         placeholder="Shakhawat / Rafi"
+                        defaultValue={editField("Cash with")}
                       />
                       <datalist id="known-holders">
                         {knownHolders.map((holder) => (
@@ -1947,11 +2058,18 @@ export default function Home() {
                         type="number"
                         min="0"
                         step="0.01"
+                        defaultValue={editField("Sellable")}
                       />
                     </label>
                     <label>
                       Waste quantity
-                      <input name="waste" type="number" min="0" step="0.01" />
+                      <input
+                        name="waste"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        defaultValue={editField("Waste")}
+                      />
                     </label>
                   </>
                 )}
@@ -1960,11 +2078,21 @@ export default function Home() {
                   <input
                     name="note"
                     placeholder="Customer, supplier, quality, delivery or task"
+                    defaultValue={freeNote(editing?.note)}
                   />
                 </label>
                 <button className="finance-button full" disabled={busy}>
-                  {common.save}
+                  {editing ? "Update record" : common.save}
                 </button>
+                {editing && (
+                  <button
+                    type="button"
+                    className="finance-button secondary full"
+                    onClick={() => setEditing(null)}
+                  >
+                    Cancel edit
+                  </button>
+                )}
               </form>
               {view === "sales" && (
                 <>
@@ -1976,18 +2104,30 @@ export default function Home() {
                           ? "現金の保管者"
                           : "Cash in hand"
                     }
-                    detail="Paid sales"
+                    detail="Collected − spent"
                   />
                   <div className="summary-list">
                     {cashInHand.length ? (
-                      cashInHand.map(([holder, amount]) => (
-                        <p key={holder}>
-                          <span>{holder}</span>
-                          <b>{yen(amount)}</b>
+                      cashInHand.map((holder) => (
+                        <p className="crop-row" key={holder.name}>
+                          <span>
+                            <b>{holder.name}</b>
+                            <small>
+                              collected {yen(holder.collected)} · spent{" "}
+                              {yen(holder.spent)}
+                            </small>
+                          </span>
+                          <b>{yen(holder.balance)}</b>
                         </p>
                       ))
                     ) : (
                       <p className="empty-copy">No paid sales yet.</p>
+                    )}
+                    {untrackedSpend > 0 && (
+                      <p>
+                        <span>Expenses with no “Paid by” recorded</span>
+                        <b>−{yen(untrackedSpend)}</b>
+                      </p>
                     )}
                     {pendingSales > 0 && (
                       <p>
@@ -2014,6 +2154,8 @@ export default function Home() {
                 entries={displayedEntries}
                 busy={busy}
                 onDelete={deleteEntry}
+                onEdit={startEdit}
+                editingId={editing?.id}
               />
             </article>
           </section>
@@ -3117,10 +3259,14 @@ function EntriesTable({
   entries,
   busy,
   onDelete,
+  onEdit,
+  editingId,
 }: {
   entries: Entry[];
   busy: boolean;
   onDelete: (id: string) => Promise<void>;
+  onEdit?: (entry: Entry) => void;
+  editingId?: string;
 }) {
   return (
     <div className="finance-table-wrap">
@@ -3157,13 +3303,24 @@ function EntriesTable({
                 </td>
                 <td>{entry.note || "—"}</td>
                 <td>
-                  <button
-                    className="table-delete"
-                    disabled={busy}
-                    onClick={() => void onDelete(entry.id)}
-                  >
-                    Delete
-                  </button>
+                  <div className="table-actions">
+                    {onEdit && (
+                      <button
+                        className="table-edit"
+                        disabled={busy}
+                        onClick={() => onEdit(entry)}
+                      >
+                        {editingId === entry.id ? "Editing…" : "Edit"}
+                      </button>
+                    )}
+                    <button
+                      className="table-delete"
+                      disabled={busy}
+                      onClick={() => void onDelete(entry.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))
