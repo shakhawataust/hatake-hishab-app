@@ -1169,3 +1169,63 @@ footer {
   border: 1px solid var(--f-line);
   border-radius: 14px;
 }
+/* Several crops for one customer, entered before a single save. */
+.sale-lines {
+  display: grid;
+  gap: 10px;
+}
+.sale-lines-head {
+  display: grid;
+  gap: 3px;
+}
+.sale-lines-head b {
+  font-size: 14px;
+}
+.sale-lines-head span {
+  color: var(--f-muted);
+  font-size: 12px;
+}
+.sale-line {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--f-line);
+  border-radius: 12px;
+  background: #f8faf7;
+}
+.sale-line .full {
+  grid-column: 1/-1;
+}
+.sale-line-head {
+  grid-column: 1/-1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.sale-line-head b {
+  color: var(--f-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sale-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #cfe0d4;
+  border-radius: 12px;
+  background: #eef5ef;
+  font-size: 13px;
+}
+.sale-total b {
+  font-size: 19px;
+  color: #276a43;
+}
+.bill-list {
+  margin-bottom: 22px;
+}
