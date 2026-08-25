@@ -89,6 +89,7 @@ type SaleLine = {
   quantity: string;
   unit: string;
 };
+type ReportScope = "month" | "all";
 type Language = "bn" | "en" | "ja";
 type MemberRole = "admin" | "accountant" | "field_member" | "sales";
 type View =
@@ -559,6 +560,244 @@ const salesText: Record<
     showTop: "上位8件のみ表示",
   },
 };
+// The report answers two questions: how did one month go, and how is the farm
+// doing overall? Both use the same sections, only the date window changes.
+const reportText: Record<
+  Language,
+  {
+    monthScope: string;
+    allScope: string;
+    monthDetail: string;
+    allDetail: string;
+    refresh: string;
+    print: string;
+    sales: string;
+    expense: string;
+    expenseHint: string;
+    profit: string;
+    loss: string;
+    profitHint: string;
+    harvest: string;
+    costPerKg: string;
+    costHint: string;
+    pending: string;
+    pendingHint: string;
+    invested: string;
+    investedHint: string;
+    plTitle: string;
+    plDetail: string;
+    salesIncome: string;
+    materialExpense: string;
+    laborWages: string;
+    travelCost: string;
+    totalExpense: string;
+    netProfit: string;
+    netLoss: string;
+    breakEven: string;
+    margin: string;
+    spentTitle: string;
+    spentDetail: string;
+    person: string;
+    spent: string;
+    share: string;
+    membersTitle: string;
+    membersDetail: string;
+    member: string;
+    hours: string;
+    wages: string;
+    travel: string;
+    investment: string;
+    contribution: string;
+    contributionHint: string;
+    cropTitle: string;
+    cropDetail: string;
+    directExpense: string;
+    monthsTitle: string;
+    monthsDetail: string;
+    month: string;
+    result: string;
+    noData: string;
+    allTime: string;
+    first: string;
+    monthWord: string;
+    months: string;
+  }
+> = {
+  bn: {
+    monthScope: "মাসিক রিপোর্ট",
+    allScope: "সম্পূর্ণ রিপোর্ট",
+    monthDetail: "একটি মাসের হিসাব",
+    allDetail: "শুরু থেকে আজ পর্যন্ত সব হিসাব",
+    refresh: "রিপোর্ট নতুন করে আনুন",
+    print: "প্রিন্ট / PDF",
+    sales: "বিক্রি",
+    expense: "খরচ",
+    expenseHint: "মালামাল + মজুরি + যাতায়াত",
+    profit: "লাভ",
+    loss: "ক্ষতি",
+    profitHint: "বিক্রি − খরচ",
+    harvest: "ফসল তোলা",
+    costPerKg: "প্রতি কেজি খরচ",
+    costHint: "মোট খরচ ÷ তোলা ফসল",
+    pending: "বাকি টাকা",
+    pendingHint: "এখনো হাতে আসেনি",
+    invested: "বিনিয়োগ",
+    investedHint: "সদস্যদের দেওয়া টাকা",
+    plTitle: "লাভ ও ক্ষতির হিসাব",
+    plDetail: "টাকা কোথা থেকে এলো, কোথায় গেলো",
+    salesIncome: "বিক্রি থেকে আয়",
+    materialExpense: "মালামাল ও অন্য খরচ",
+    laborWages: "শ্রমের মজুরি",
+    travelCost: "যাতায়াত খরচ",
+    totalExpense: "মোট খরচ",
+    netProfit: "নিট লাভ",
+    netLoss: "নিট ক্ষতি",
+    breakEven: "লাভ-ক্ষতি সমান",
+    margin: "লাভের হার",
+    spentTitle: "কে কত খরচ করেছে",
+    spentDetail: "যে যার পকেট থেকে দিয়েছে",
+    person: "নাম",
+    spent: "খরচ করেছে",
+    share: "অংশ",
+    membersTitle: "সদস্যদের অবদান",
+    membersDetail: "টাকা, শ্রম ও বিনিয়োগ",
+    member: "সদস্য",
+    hours: "ঘণ্টা",
+    wages: "মজুরি",
+    travel: "যাতায়াত",
+    investment: "বিনিয়োগ",
+    contribution: "মোট অবদান",
+    contributionHint: "খরচ করা টাকা + বিনিয়োগ",
+    cropTitle: "ফসলভিত্তিক ফলাফল",
+    cropDetail: "কোন ফসল কেমন করলো",
+    directExpense: "সরাসরি খরচ",
+    monthsTitle: "মাস অনুযায়ী হিসাব",
+    monthsDetail: "প্রতি মাসের বিক্রি, খরচ ও ফলাফল",
+    month: "মাস",
+    result: "ফলাফল",
+    noData: "এই সময়ের কোনো রেকর্ড নেই।",
+    allTime: "শুরু থেকে আজ পর্যন্ত",
+    first: "প্রথম রেকর্ড",
+    monthWord: "মাসের রেকর্ড",
+    months: "মাসের রেকর্ড",
+  },
+  en: {
+    monthScope: "Monthly report",
+    allScope: "Full report",
+    monthDetail: "One month at a time",
+    allDetail: "Every record since day one",
+    refresh: "Refresh report",
+    print: "Print / PDF",
+    sales: "Sales",
+    expense: "Expense",
+    expenseHint: "Materials + wages + travel",
+    profit: "Profit",
+    loss: "Loss",
+    profitHint: "Sales − expense",
+    harvest: "Harvested",
+    costPerKg: "Cost per kg",
+    costHint: "Total expense ÷ harvest",
+    pending: "Unpaid sales",
+    pendingHint: "Money not received yet",
+    invested: "Invested",
+    investedHint: "Money put in by members",
+    plTitle: "Profit & loss",
+    plDetail: "Where the money came from and went",
+    salesIncome: "Income from sales",
+    materialExpense: "Materials and other expense",
+    laborWages: "Labor wages",
+    travelCost: "Travel cost",
+    totalExpense: "Total expense",
+    netProfit: "Net profit",
+    netLoss: "Net loss",
+    breakEven: "Break even",
+    margin: "Profit margin",
+    spentTitle: "Who spent how much",
+    spentDetail: "Cash paid out of each pocket",
+    person: "Name",
+    spent: "Spent",
+    share: "Share",
+    membersTitle: "Member contribution",
+    membersDetail: "Money, work and investment",
+    member: "Member",
+    hours: "Hours",
+    wages: "Wages",
+    travel: "Travel",
+    investment: "Investment",
+    contribution: "Contribution",
+    contributionHint: "Cash spent + invested",
+    cropTitle: "Crop performance",
+    cropDetail: "How each crop did",
+    directExpense: "Direct expense",
+    monthsTitle: "Month by month",
+    monthsDetail: "Sales, expense and result per month",
+    month: "Month",
+    result: "Result",
+    noData: "No records in this period.",
+    allTime: "All time",
+    first: "First record",
+    monthWord: "month on record",
+    months: "months on record",
+  },
+  ja: {
+    monthScope: "月次レポート",
+    allScope: "全期間レポート",
+    monthDetail: "1か月ずつ確認",
+    allDetail: "開始から今日までのすべて",
+    refresh: "レポートを更新",
+    print: "印刷 / PDF",
+    sales: "売上",
+    expense: "支出",
+    expenseHint: "資材＋賃金＋交通費",
+    profit: "利益",
+    loss: "損失",
+    profitHint: "売上 − 支出",
+    harvest: "収穫量",
+    costPerKg: "1kgあたり原価",
+    costHint: "支出合計 ÷ 収穫量",
+    pending: "未収の売上",
+    pendingHint: "まだ受け取っていない金額",
+    invested: "出資額",
+    investedHint: "メンバーが入れた資金",
+    plTitle: "損益",
+    plDetail: "お金の入りと出",
+    salesIncome: "売上収入",
+    materialExpense: "資材・その他支出",
+    laborWages: "労賃",
+    travelCost: "交通費",
+    totalExpense: "支出合計",
+    netProfit: "純利益",
+    netLoss: "純損失",
+    breakEven: "収支ゼロ",
+    margin: "利益率",
+    spentTitle: "誰がいくら使ったか",
+    spentDetail: "各自が立て替えた金額",
+    person: "名前",
+    spent: "支出額",
+    share: "割合",
+    membersTitle: "メンバーの貢献",
+    membersDetail: "資金・作業・出資",
+    member: "メンバー",
+    hours: "時間",
+    wages: "労賃",
+    travel: "交通費",
+    investment: "出資",
+    contribution: "貢献合計",
+    contributionHint: "立替金＋出資",
+    cropTitle: "作物別の成績",
+    cropDetail: "作物ごとの結果",
+    directExpense: "直接費",
+    monthsTitle: "月別の推移",
+    monthsDetail: "月ごとの売上・支出・損益",
+    month: "月",
+    result: "損益",
+    noData: "この期間の記録はありません。",
+    allTime: "全期間",
+    first: "最初の記録",
+    monthWord: "か月分の記録",
+    months: "か月分の記録",
+  },
+};
 const crops = [
   "করলা (Bitter gourd)",
   "লাউ (Bottle gourd)",
@@ -633,6 +872,12 @@ const yen = (value: number) =>
     currency: "JPY",
     maximumFractionDigits: 0,
   }).format(value);
+// "2026-08" reads better as "Aug 2026" on the report tables.
+const monthName = (month: string, language: Language) =>
+  new Intl.DateTimeFormat(
+    language === "ja" ? "ja-JP" : language === "bn" ? "bn-BD" : "en-GB",
+    { year: "numeric", month: "short" },
+  ).format(new Date(`${month}-01T00:00:00`));
 // Notes are stored as "Label: value | Label: value", so read one label back.
 const noteValue = (note: string | null | undefined, label: string) =>
   note?.match(new RegExp(`${label}:\\s*([^|]+)`, "i"))?.[1].trim() ?? "";
@@ -766,6 +1011,7 @@ export default function Home() {
   const [alertsReady, setAlertsReady] = useState(false);
   const [investmentsReady, setInvestmentsReady] = useState(false);
   const [reportMonth, setReportMonth] = useState(today().slice(0, 7));
+  const [reportScope, setReportScope] = useState<ReportScope>("month");
   const [editing, setEditing] = useState<Entry | null>(null);
   const [editingBatch, setEditingBatch] = useState<CropBatch | null>(null);
   const [editingTask, setEditingTask] = useState<CropTask | null>(null);
@@ -2055,51 +2301,137 @@ export default function Home() {
       (task) => !task.completed && task.due_on < today(),
     ).length,
   };
-  const reportEntries = entries.filter((entry) =>
-    entry.occurred_on.startsWith(reportMonth),
+  // The report reads either one month or the farm's whole history; every figure
+  // below follows the same window so the sections always agree.
+  const fullReport = reportScope === "all";
+  const reportEntries = fullReport
+    ? entries
+    : entries.filter((entry) => entry.occurred_on.startsWith(reportMonth));
+  const reportInvestments = fullReport
+    ? investments
+    : investments.filter((investment) =>
+        investment.date.startsWith(reportMonth),
+      );
+  const sumOf = (rows: Entry[]) =>
+    rows.reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
+  const reportSales = sumOf(
+    reportEntries.filter((entry) => entry.kind === "sale"),
   );
-  const reportSales = reportEntries
-    .filter((entry) => entry.kind === "sale")
-    .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
-  const reportExpense = reportEntries
-    .filter((entry) => entry.kind === "expense" || entry.kind === "labor")
-    .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
+  const reportMaterial = sumOf(
+    reportEntries.filter((entry) => entry.kind === "expense"),
+  );
+  const reportLaborRows = reportEntries.filter(
+    (entry) => entry.kind === "labor",
+  );
+  const reportLaborTotal = sumOf(reportLaborRows);
+  // Travel is booked inside the labor amount, so the wage share is what is left.
+  const reportTravel = reportLaborRows.reduce(
+    (total, entry) =>
+      total +
+      Math.min(transportFromNote(entry.note), Number(entry.amount ?? 0)),
+    0,
+  );
+  const reportWages = reportLaborTotal - reportTravel;
+  const reportExpense = reportMaterial + reportLaborTotal;
+  const reportHours = reportLaborRows.reduce(
+    (total, entry) => total + Number(entry.quantity ?? 0),
+    0,
+  );
+  const reportHarvest = reportEntries
+    .filter((entry) => entry.kind === "harvest")
+    .reduce((total, entry) => total + Number(entry.quantity ?? 0), 0);
+  const reportPending = sumOf(
+    reportEntries.filter(
+      (entry) =>
+        entry.kind === "sale" && /Payment:\s*Pending/i.test(entry.note ?? ""),
+    ),
+  );
+  const reportInvested = reportInvestments.reduce(
+    (total, item) => total + item.amount,
+    0,
+  );
+  const reportSpenders = spendByPerson(reportEntries);
+  const reportSpendTotal = reportSpenders.reduce(
+    (total, [, amount]) => total + amount,
+    0,
+  );
   const reportCrops = [
     ...new Set(reportEntries.map((entry) => entry.crop).filter(Boolean)),
   ] as string[];
   const reportMembers = (() => {
     const members = new Map<
       string,
-      { hours: number; travel: number; investment: number; paid: number }
+      {
+        hours: number;
+        wages: number;
+        travel: number;
+        investment: number;
+        paid: number;
+      }
     >();
     const getMember = (name: string) => {
       const key = name.trim() || "Unassigned";
       if (!members.has(key))
-        members.set(key, { hours: 0, travel: 0, investment: 0, paid: 0 });
+        members.set(key, {
+          hours: 0,
+          wages: 0,
+          travel: 0,
+          investment: 0,
+          paid: 0,
+        });
       return members.get(key)!;
     };
-    reportEntries
-      .filter((entry) => entry.kind === "labor")
-      .forEach((entry) => {
-        const name =
-          entry.note?.match(/Member:\s*([^|]+)/i)?.[1] ?? "Unassigned";
-        const item = getMember(name);
-        item.hours += Number(entry.quantity ?? 0);
-        item.travel += transportFromNote(entry.note);
-      });
+    reportLaborRows.forEach((entry) => {
+      const name = entry.note?.match(/Member:\s*([^|]+)/i)?.[1] ?? "Unassigned";
+      const item = getMember(name);
+      const travel = Math.min(
+        transportFromNote(entry.note),
+        Number(entry.amount ?? 0),
+      );
+      item.hours += Number(entry.quantity ?? 0);
+      item.travel += travel;
+      item.wages += Number(entry.amount ?? 0) - travel;
+    });
     spendByPerson(reportEntries).forEach(([name, amount]) => {
       getMember(name).paid += amount;
     });
-    // Only this month's money, like every other figure on the report.
-    investments
-      .filter((investment) => investment.date.startsWith(reportMonth))
-      .forEach((investment) => {
-        getMember(investment.member).investment += investment.amount;
-      });
+    reportInvestments.forEach((investment) => {
+      getMember(investment.member).investment += investment.amount;
+    });
     return [...members.entries()]
-      .map(([name, totals]) => ({ name, ...totals }))
-      .sort((a, b) => b.paid + b.investment - (a.paid + a.investment));
+      .map(([name, totals]) => ({
+        name,
+        ...totals,
+        // What the member put into the farm: cash they paid out or invested.
+        contribution: totals.paid + totals.investment,
+      }))
+      .sort((a, b) => b.contribution - a.contribution || b.hours - a.hours);
   })();
+  // Every month that holds a record, newest first, for the full report.
+  const reportMonths = [
+    ...new Set(entries.map((entry) => entry.occurred_on.slice(0, 7))),
+  ]
+    .sort((a, b) => b.localeCompare(a))
+    .map((month) => {
+      const rows = entries.filter((entry) =>
+        entry.occurred_on.startsWith(month),
+      );
+      const sales = sumOf(rows.filter((entry) => entry.kind === "sale"));
+      const expense = sumOf(
+        rows.filter(
+          (entry) => entry.kind === "expense" || entry.kind === "labor",
+        ),
+      );
+      return {
+        month,
+        sales,
+        expense,
+        harvest: rows
+          .filter((entry) => entry.kind === "harvest")
+          .reduce((total, entry) => total + Number(entry.quantity ?? 0), 0),
+        profit: sales - expense,
+      };
+    });
   const capitalTotal = investments
     .filter((item) => item.type === "Capital")
     .reduce((total, item) => total + item.amount, 0);
@@ -2108,6 +2440,7 @@ export default function Home() {
   const common = commonText[language];
   const handover = handoverText[language];
   const sales = salesText[language];
+  const report = reportText[language];
   // "1 items" reads badly in English; Bengali and Japanese pass the same word
   // twice and stay unchanged.
   const count = (total: number, one: string, many: string) =>
@@ -4229,135 +4562,396 @@ export default function Home() {
           <section className="finance-card report-page">
             <SectionTitle
               title={labels[language].reports}
-              detail="Print / Save as PDF"
+              detail={fullReport ? report.allDetail : report.monthDetail}
             />
             <div className="report-controls">
-              <label>
-                Report month
-                <input
-                  type="month"
-                  value={reportMonth}
-                  onChange={(event) => setReportMonth(event.target.value)}
-                />
-              </label>
-              <button
-                className="finance-button secondary"
-                onClick={() => void loadWorkspace()}
-              >
-                Refresh Report
-              </button>
+              <div className="report-scope">
+                <button
+                  type="button"
+                  className={fullReport ? "" : "active"}
+                  onClick={() => setReportScope("month")}
+                >
+                  {report.monthScope}
+                </button>
+                <button
+                  type="button"
+                  className={fullReport ? "active" : ""}
+                  onClick={() => setReportScope("all")}
+                >
+                  {report.allScope}
+                </button>
+              </div>
+              {fullReport ? (
+                <p className="report-window">
+                  <b>{report.allTime}</b>
+                  {reportMonths.length ? (
+                    <small>
+                      {report.first}:{" "}
+                      {monthName(
+                        reportMonths[reportMonths.length - 1].month,
+                        language,
+                      )}{" "}
+                      ·{" "}
+                      {count(
+                        reportMonths.length,
+                        report.monthWord,
+                        report.months,
+                      )}
+                    </small>
+                  ) : null}
+                </p>
+              ) : (
+                <label>
+                  {report.month}
+                  <input
+                    type="month"
+                    value={reportMonth}
+                    onChange={(event) => setReportMonth(event.target.value)}
+                  />
+                </label>
+              )}
+              <div className="report-actions">
+                <button
+                  className="finance-button secondary"
+                  onClick={() => void loadWorkspace()}
+                >
+                  {report.refresh}
+                </button>
+                <button
+                  className="finance-button secondary"
+                  onClick={() => window.print()}
+                >
+                  {report.print}
+                </button>
+              </div>
             </div>
             <div className="report-metrics">
               <Metric
-                label="Month sales"
+                label={report.sales}
                 value={yen(reportSales)}
-                note={reportMonth}
+                note={
+                  fullReport ? report.allTime : monthName(reportMonth, language)
+                }
               />
               <Metric
-                label="Month expense"
+                label={report.expense}
                 value={yen(reportExpense)}
-                note="Including labor & travel"
+                note={report.expenseHint}
               />
               <Metric
-                label="Month profit"
+                label={
+                  reportSales - reportExpense < 0 ? report.loss : report.profit
+                }
                 value={yen(reportSales - reportExpense)}
-                note="Sales − expense"
+                note={report.profitHint}
+              />
+              <Metric
+                label={report.harvest}
+                value={`${reportHarvest.toFixed(1)} kg`}
+                note={
+                  reportHarvest
+                    ? `${report.costPerKg} ${yen(reportExpense / reportHarvest)}`
+                    : report.costHint
+                }
               />
             </div>
-            <div className="finance-table-wrap">
-              <table className="finance-table">
-                <thead>
-                  <tr>
-                    <th>{common.crop}</th>
-                    <th>{labels[language].harvest}</th>
-                    <th>{labels[language].sales}</th>
-                    <th>Direct expense</th>
-                    <th>Cost / kg</th>
-                    <th>Margin</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportCrops.length ? (
-                    reportCrops.map((crop) => {
-                      const rows = reportEntries.filter(
-                        (entry) => entry.crop === crop,
-                      );
-                      const harvest = rows
-                        .filter((entry) => entry.kind === "harvest")
-                        .reduce(
-                          (total, entry) => total + Number(entry.quantity ?? 0),
-                          0,
-                        );
-                      const sales = rows
-                        .filter((entry) => entry.kind === "sale")
-                        .reduce(
-                          (total, entry) => total + Number(entry.amount ?? 0),
-                          0,
-                        );
-                      const expense = rows
-                        .filter(
-                          (entry) =>
-                            entry.kind === "expense" || entry.kind === "labor",
-                        )
-                        .reduce(
-                          (total, entry) => total + Number(entry.amount ?? 0),
-                          0,
-                        );
-                      return (
-                        <tr key={crop}>
-                          <td>{crop}</td>
-                          <td>{harvest} kg</td>
-                          <td>{yen(sales)}</td>
-                          <td>{yen(expense)}</td>
-                          <td>{harvest ? yen(expense / harvest) : "—"}</td>
-                          <td>{yen(sales - expense)}</td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={6}>No records for this month.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <section className="report-contributions">
+            <section className="report-block">
+              <SectionTitle title={report.plTitle} detail={report.plDetail} />
+              <div className="pl-sheet">
+                <p className="pl-row income">
+                  <span>{report.salesIncome}</span>
+                  <b>{yen(reportSales)}</b>
+                </p>
+                <p className="pl-row">
+                  <span>− {report.materialExpense}</span>
+                  <b>{yen(reportMaterial)}</b>
+                </p>
+                <p className="pl-row">
+                  <span>− {report.laborWages}</span>
+                  <b>{yen(reportWages)}</b>
+                </p>
+                <p className="pl-row">
+                  <span>− {report.travelCost}</span>
+                  <b>{yen(reportTravel)}</b>
+                </p>
+                <p className="pl-row subtotal">
+                  <span>{report.totalExpense}</span>
+                  <b>{yen(reportExpense)}</b>
+                </p>
+                <p
+                  className={`pl-row result ${
+                    reportSales - reportExpense > 0
+                      ? "good"
+                      : reportSales - reportExpense < 0
+                        ? "bad"
+                        : ""
+                  }`}
+                >
+                  <span>
+                    {reportSales - reportExpense > 0
+                      ? report.netProfit
+                      : reportSales - reportExpense < 0
+                        ? report.netLoss
+                        : report.breakEven}
+                  </span>
+                  <b>{yen(Math.abs(reportSales - reportExpense))}</b>
+                </p>
+                <p className="pl-note">
+                  <span>{report.margin}</span>
+                  <b>
+                    {reportSales
+                      ? `${(((reportSales - reportExpense) / reportSales) * 100).toFixed(0)}%`
+                      : "—"}
+                  </b>
+                </p>
+                <p className="pl-note">
+                  <span>{report.pending}</span>
+                  <b>{yen(reportPending)}</b>
+                </p>
+                <p className="pl-note">
+                  <span>{report.invested}</span>
+                  <b>{yen(reportInvested)}</b>
+                </p>
+              </div>
+            </section>
+            <section className="report-block">
               <SectionTitle
-                title="Member Contribution"
-                detail="Expenses paid + hours + investment"
+                title={report.spentTitle}
+                detail={report.spentDetail}
               />
               <div className="finance-table-wrap">
                 <table className="finance-table">
                   <thead>
                     <tr>
-                      <th>Member</th>
-                      <th>{common.paidBy}</th>
-                      <th>Hours</th>
-                      <th>Travel</th>
-                      <th>Investment</th>
+                      <th>{report.person}</th>
+                      <th>{report.spent}</th>
+                      <th>{report.share}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {reportMembers.length ? (
-                      reportMembers.map((member) => (
-                        <tr key={member.name}>
-                          <td>{member.name}</td>
-                          <td>{member.paid ? yen(member.paid) : "—"}</td>
-                          <td>{member.hours.toFixed(1)} h</td>
-                          <td>{yen(member.travel)}</td>
-                          <td>{yen(member.investment)}</td>
+                    {reportSpenders.length ? (
+                      <>
+                        {reportSpenders.map(([name, amount]) => (
+                          <tr key={name}>
+                            <td>{name}</td>
+                            <td>{yen(amount)}</td>
+                            <td>
+                              <span className="share-cell">
+                                <i
+                                  style={{
+                                    width: `${reportSpendTotal ? (amount / reportSpendTotal) * 100 : 0}%`,
+                                  }}
+                                />
+                                <em>
+                                  {reportSpendTotal
+                                    ? `${((amount / reportSpendTotal) * 100).toFixed(0)}%`
+                                    : "—"}
+                                </em>
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="table-total">
+                          <td>{report.totalExpense}</td>
+                          <td>{yen(reportSpendTotal)}</td>
+                          <td>100%</td>
                         </tr>
-                      ))
+                      </>
                     ) : (
                       <tr>
-                        <td colSpan={5}>No member contribution records yet.</td>
+                        <td colSpan={3}>{report.noData}</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
             </section>
+            <section className="report-block">
+              <SectionTitle
+                title={report.membersTitle}
+                detail={report.membersDetail}
+              />
+              <div className="finance-table-wrap">
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>{report.member}</th>
+                      <th>{report.hours}</th>
+                      <th>{report.wages}</th>
+                      <th>{report.travel}</th>
+                      <th>{common.paidBy}</th>
+                      <th>{report.investment}</th>
+                      <th>{report.contribution}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportMembers.length ? (
+                      <>
+                        {reportMembers.map((member) => (
+                          <tr key={member.name}>
+                            <td>{member.name}</td>
+                            <td>
+                              {member.hours
+                                ? `${member.hours.toFixed(1)} h`
+                                : "—"}
+                            </td>
+                            <td>{member.wages ? yen(member.wages) : "—"}</td>
+                            <td>{member.travel ? yen(member.travel) : "—"}</td>
+                            <td>{member.paid ? yen(member.paid) : "—"}</td>
+                            <td>
+                              {member.investment ? yen(member.investment) : "—"}
+                            </td>
+                            <td>
+                              <b>{yen(member.contribution)}</b>
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="table-total">
+                          <td>{report.contribution}</td>
+                          <td>{reportHours.toFixed(1)} h</td>
+                          <td>{yen(reportWages)}</td>
+                          <td>{yen(reportTravel)}</td>
+                          <td>{yen(reportSpendTotal)}</td>
+                          <td>{yen(reportInvested)}</td>
+                          <td>{yen(reportSpendTotal + reportInvested)}</td>
+                        </tr>
+                      </>
+                    ) : (
+                      <tr>
+                        <td colSpan={7}>{report.noData}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <p className="report-hint">{report.contributionHint}</p>
+            </section>
+            <section className="report-block">
+              <SectionTitle
+                title={report.cropTitle}
+                detail={report.cropDetail}
+              />
+              <div className="finance-table-wrap">
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>{common.crop}</th>
+                      <th>{labels[language].harvest}</th>
+                      <th>{labels[language].sales}</th>
+                      <th>{report.directExpense}</th>
+                      <th>{report.costPerKg}</th>
+                      <th>{report.result}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportCrops.length ? (
+                      reportCrops.map((crop) => {
+                        const rows = reportEntries.filter(
+                          (entry) => entry.crop === crop,
+                        );
+                        const harvest = rows
+                          .filter((entry) => entry.kind === "harvest")
+                          .reduce(
+                            (total, entry) =>
+                              total + Number(entry.quantity ?? 0),
+                            0,
+                          );
+                        const cropSales = sumOf(
+                          rows.filter((entry) => entry.kind === "sale"),
+                        );
+                        const expense = sumOf(
+                          rows.filter(
+                            (entry) =>
+                              entry.kind === "expense" ||
+                              entry.kind === "labor",
+                          ),
+                        );
+                        return (
+                          <tr key={crop}>
+                            <td>{crop}</td>
+                            <td>{harvest ? `${harvest} kg` : "—"}</td>
+                            <td>{yen(cropSales)}</td>
+                            <td>{yen(expense)}</td>
+                            <td>{harvest ? yen(expense / harvest) : "—"}</td>
+                            <td
+                              className={
+                                cropSales - expense < 0 ? "bad" : "good"
+                              }
+                            >
+                              {yen(cropSales - expense)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={6}>{report.noData}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            {fullReport && (
+              <section className="report-block">
+                <SectionTitle
+                  title={report.monthsTitle}
+                  detail={report.monthsDetail}
+                />
+                <div className="finance-table-wrap">
+                  <table className="finance-table">
+                    <thead>
+                      <tr>
+                        <th>{report.month}</th>
+                        <th>{report.harvest}</th>
+                        <th>{labels[language].sales}</th>
+                        <th>{report.expense}</th>
+                        <th>{report.result}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportMonths.length ? (
+                        <>
+                          {reportMonths.map((row) => (
+                            <tr key={row.month}>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="month-link"
+                                  onClick={() => {
+                                    setReportMonth(row.month);
+                                    setReportScope("month");
+                                  }}
+                                >
+                                  {monthName(row.month, language)}
+                                </button>
+                              </td>
+                              <td>{row.harvest ? `${row.harvest} kg` : "—"}</td>
+                              <td>{yen(row.sales)}</td>
+                              <td>{yen(row.expense)}</td>
+                              <td className={row.profit < 0 ? "bad" : "good"}>
+                                {yen(row.profit)}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className="table-total">
+                            <td>{report.allTime}</td>
+                            <td>{reportHarvest.toFixed(1)} kg</td>
+                            <td>{yen(reportSales)}</td>
+                            <td>{yen(reportExpense)}</td>
+                            <td>{yen(reportSales - reportExpense)}</td>
+                          </tr>
+                        </>
+                      ) : (
+                        <tr>
+                          <td colSpan={5}>{report.noData}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
           </section>
         )}
 
