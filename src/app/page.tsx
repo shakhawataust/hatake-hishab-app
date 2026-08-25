@@ -433,27 +433,64 @@ const salesText: Record<
     remove: string;
     total: string;
     itemsWord: string;
+    itemWord: string;
     needItem: string;
     savedCount: string;
     bills: string;
     billsDetail: string;
     pending: string;
+    customers: string;
+    customersDetail: string;
+    search: string;
+    buyers: string;
+    buyer: string;
+    repeat: string;
+    topBuyer: string;
+    unpaid: string;
+    visits: string;
+    visit: string;
+    lastBuy: string;
+    mostBought: string;
+    open: string;
+    close: string;
+    noCustomer: string;
+    share: string;
+    showAll: string;
+    showTop: string;
   }
 > = {
   bn: {
     items: "ফসলের আইটেম",
-    itemsHint:
-      "এই ক্রেতার সব ফসল একসাথে যোগ করুন, তারপর একবারেই সংরক্ষণ করুন।",
+    itemsHint: "এই ক্রেতার সব ফসল একসাথে যোগ করুন, তারপর একবারেই সংরক্ষণ করুন।",
     item: "আইটেম",
     addItem: "＋ আরেকটি ফসল যোগ করুন",
     remove: "বাদ দিন",
     total: "সর্বমোট",
     itemsWord: "আইটেম",
+    itemWord: "আইটেম",
     needItem: "অন্তত একটি ফসল ও তার দাম দিন।",
     savedCount: "টি বিক্রির রেকর্ড সংরক্ষিত হয়েছে।",
-    bills: "ক্রেতা অনুযায়ী মোট",
-    billsDetail: "একই ক্রেতা, একই দিন",
+    bills: "কেনাকাটার হিসাব",
+    billsDetail: "একই দিনের সব আইটেম একসাথে",
     pending: "বাকি আছে",
+    customers: "ক্রেতা ড্যাশবোর্ড",
+    customersDetail: "নাম অনুযায়ী সব কেনাকাটা এক জায়গায়",
+    search: "ক্রেতার নাম খুঁজুন",
+    buyers: "মোট ক্রেতা",
+    buyer: "ক্রেতা",
+    repeat: "বারবার কিনেছে",
+    topBuyer: "সবচেয়ে বড় ক্রেতা",
+    unpaid: "বাকি টাকা",
+    visits: "বার কিনেছে",
+    visit: "বার কিনেছে",
+    lastBuy: "শেষ কেনা",
+    mostBought: "সবচেয়ে বেশি কিনেছে",
+    open: "বিস্তারিত দেখুন",
+    close: "বন্ধ করুন",
+    noCustomer: "এখনো কোনো ক্রেতার বিক্রি নেই।",
+    share: "মোট বিক্রির অংশ",
+    showAll: "সব ক্রেতা দেখুন",
+    showTop: "শুধু সেরা ৮ জন",
   },
   en: {
     items: "Crop items",
@@ -463,11 +500,30 @@ const salesText: Record<
     remove: "Remove",
     total: "Total",
     itemsWord: "items",
+    itemWord: "item",
     needItem: "Add at least one crop with an amount.",
     savedCount: "sale records saved.",
-    bills: "Customer totals",
-    billsDetail: "Same customer, same day",
+    bills: "Purchases",
+    billsDetail: "One line per day",
     pending: "Pending",
+    customers: "Customer dashboard",
+    customersDetail: "Every buyer, grouped by name",
+    search: "Search a customer",
+    buyers: "Customers",
+    buyer: "customer",
+    repeat: "Repeat buyers",
+    topBuyer: "Top customer",
+    unpaid: "Unpaid",
+    visits: "purchases",
+    visit: "purchase",
+    lastBuy: "Last",
+    mostBought: "Most bought",
+    open: "Details",
+    close: "Hide",
+    noCustomer: "No customer sales recorded yet.",
+    share: "share of sales",
+    showAll: "Show all customers",
+    showTop: "Show top 8 only",
   },
   ja: {
     items: "作物の明細",
@@ -477,11 +533,30 @@ const salesText: Record<
     remove: "削除",
     total: "合計",
     itemsWord: "件",
+    itemWord: "件",
     needItem: "作物と金額を1件以上入力してください。",
     savedCount: "件の販売記録を保存しました。",
-    bills: "顧客ごとの合計",
-    billsDetail: "同じ顧客・同じ日",
+    bills: "購入履歴",
+    billsDetail: "1日ごとに1行",
     pending: "未収",
+    customers: "顧客ダッシュボード",
+    customersDetail: "名前ごとにまとめた全顧客",
+    search: "顧客を検索",
+    buyers: "顧客数",
+    buyer: "顧客",
+    repeat: "再購入した顧客",
+    topBuyer: "最上位の顧客",
+    unpaid: "未収金",
+    visits: "回購入",
+    visit: "回購入",
+    lastBuy: "最終購入",
+    mostBought: "購入が多い作物",
+    open: "詳細",
+    close: "閉じる",
+    noCustomer: "顧客の販売記録はまだありません。",
+    share: "売上に占める割合",
+    showAll: "すべての顧客を表示",
+    showTop: "上位8件のみ表示",
   },
 };
 const crops = [
@@ -561,6 +636,17 @@ const yen = (value: number) =>
 // Notes are stored as "Label: value | Label: value", so read one label back.
 const noteValue = (note: string | null | undefined, label: string) =>
   note?.match(new RegExp(`${label}:\\s*([^|]+)`, "i"))?.[1].trim() ?? "";
+// "Abu Bhai", "Abu bhai" and "abu  bhai" are one customer, so names are matched
+// on a squashed lowercase form while the display keeps the member's spelling.
+const customerKey = (name: string) =>
+  name.trim().toLowerCase().replace(/\s+/g, " ");
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => [...part][0]?.toUpperCase() ?? "")
+    .join("") || "?";
 const noteLabels = [
   "Customer",
   "Channel",
@@ -695,6 +781,9 @@ export default function Home() {
   const [saleLines, setSaleLines] = useState<SaleLine[]>([
     { id: 1, crop: "", amount: "", quantity: "", unit: "" },
   ]);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [openCustomer, setOpenCustomer] = useState<string | null>(null);
+  const [allCustomers, setAllCustomers] = useState(false);
   const resetSaleLines = () =>
     setSaleLines([{ id: 1, crop: "", amount: "", quantity: "", unit: "" }]);
   const addSaleLine = () =>
@@ -1669,44 +1758,115 @@ export default function Home() {
         entry.kind === "sale" && !/Payment:\s*\w/i.test(entry.note ?? ""),
     )
     .reduce((total, entry) => total + Number(entry.amount ?? 0), 0);
-  // Rows saved together for one customer on one day read back as a single bill,
-  // so the member can check the total they were paid.
-  const customerBills = (() => {
-    const bills = new Map<
-      string,
-      {
-        key: string;
-        date: string;
-        customer: string;
-        items: string[];
-        total: number;
-        pending: boolean;
-      }
-    >();
+  // One card per customer: every purchase they ever made, the days they came
+  // and what they bought, so a regular like Abu Bhai reads as a single name.
+  const customers = (() => {
+    type Bill = {
+      key: string;
+      date: string;
+      items: string[];
+      total: number;
+      pending: boolean;
+    };
+    type Customer = {
+      key: string;
+      name: string;
+      spellings: Map<string, number>;
+      total: number;
+      pending: number;
+      items: number;
+      firstDate: string;
+      lastDate: string;
+      crops: Map<string, number>;
+      bills: Map<string, Bill>;
+    };
+    const all = new Map<string, Customer>();
     entries
       .filter((entry) => entry.kind === "sale")
       .forEach((entry) => {
-        const customer = noteValue(entry.note, "Customer") || unknownHolder;
-        const key = `${entry.occurred_on}|${customer.toLowerCase()}`;
-        const bill = bills.get(key) ?? {
+        // Rows imported from the 2026 workbook label the buyer "Buyer", so read
+        // that too instead of filing them all under "Not recorded".
+        const name =
+          noteValue(entry.note, "Customer") ||
+          noteValue(entry.note, "Buyer") ||
+          unknownHolder;
+        const key = customerKey(name);
+        const customer = all.get(key) ?? {
           key,
+          name,
+          spellings: new Map<string, number>(),
+          total: 0,
+          pending: 0,
+          items: 0,
+          firstDate: entry.occurred_on,
+          lastDate: entry.occurred_on,
+          crops: new Map<string, number>(),
+          bills: new Map<string, Bill>(),
+        };
+        const amount = Number(entry.amount ?? 0);
+        const unpaid = /Payment:\s*Pending/i.test(entry.note ?? "");
+        customer.spellings.set(name, (customer.spellings.get(name) ?? 0) + 1);
+        customer.total += amount;
+        if (unpaid) customer.pending += amount;
+        customer.items += 1;
+        if (entry.occurred_on < customer.firstDate)
+          customer.firstDate = entry.occurred_on;
+        if (entry.occurred_on > customer.lastDate)
+          customer.lastDate = entry.occurred_on;
+        const crop = entry.crop || "—";
+        customer.crops.set(crop, (customer.crops.get(crop) ?? 0) + amount);
+        const bill = customer.bills.get(entry.occurred_on) ?? {
+          key: `${key}|${entry.occurred_on}`,
           date: entry.occurred_on,
-          customer,
           items: [],
           total: 0,
           pending: false,
         };
         bill.items.push(
-          `${entry.crop || "—"}${entry.quantity ? ` (${entry.quantity}${entry.unit ? ` ${entry.unit}` : ""})` : ""}`,
+          `${crop}${entry.quantity ? ` (${entry.quantity}${entry.unit ? ` ${entry.unit}` : ""})` : ""}`,
         );
-        bill.total += Number(entry.amount ?? 0);
-        if (/Payment:\s*Pending/i.test(entry.note ?? "")) bill.pending = true;
-        bills.set(key, bill);
+        bill.total += amount;
+        if (unpaid) bill.pending = true;
+        customer.bills.set(entry.occurred_on, bill);
+        all.set(key, customer);
       });
-    return [...bills.values()].sort(
-      (a, b) => b.date.localeCompare(a.date) || b.total - a.total,
-    );
+    return [...all.values()]
+      .map((customer) => ({
+        key: customer.key,
+        // The spelling the member typed most often wins the card title.
+        name: [...customer.spellings.entries()].sort(
+          ([, a], [, b]) => b - a,
+        )[0][0],
+        total: customer.total,
+        pending: customer.pending,
+        items: customer.items,
+        visits: customer.bills.size,
+        firstDate: customer.firstDate,
+        lastDate: customer.lastDate,
+        crops: [...customer.crops.entries()].sort(([, a], [, b]) => b - a),
+        bills: [...customer.bills.values()].sort((a, b) =>
+          b.date.localeCompare(a.date),
+        ),
+      }))
+      .sort((a, b) => b.total - a.total);
   })();
+  const customerSales = customers.reduce(
+    (total, customer) => total + customer.total,
+    0,
+  );
+  const matchedCustomers = customers.filter((customer) =>
+    customerKey(customer.name).includes(customerKey(customerQuery)),
+  );
+  // The biggest buyers first; the rest are one tap away rather than hidden.
+  const shownCustomers =
+    allCustomers || customerQuery
+      ? matchedCustomers
+      : matchedCustomers.slice(0, 8);
+  // "Not recorded" is a pile of old rows, not a person, so it never wins the
+  // top-customer tile.
+  const topCustomer =
+    customers.find((customer) => customer.key !== customerKey(unknownHolder)) ??
+    customers[0];
   // Names already used anywhere, so the field can be filled with one tap.
   const knownHolders = [
     ...new Set(
@@ -1948,6 +2108,10 @@ export default function Home() {
   const common = commonText[language];
   const handover = handoverText[language];
   const sales = salesText[language];
+  // "1 items" reads badly in English; Bengali and Japanese pass the same word
+  // twice and stay unchanged.
+  const count = (total: number, one: string, many: string) =>
+    `${total} ${total === 1 ? one : many}`;
   const changeView = (next: View) => {
     setEditing(null);
     setEditingBatch(null);
@@ -2480,7 +2644,12 @@ export default function Home() {
                     )}
                     <p className="sale-total">
                       <span>
-                        {sales.total} · {saleLines.length} {sales.itemsWord}
+                        {sales.total} ·{" "}
+                        {count(
+                          saleLines.length,
+                          sales.itemWord,
+                          sales.itemsWord,
+                        )}
                       </span>
                       <b>{yen(saleLinesTotal)}</b>
                     </p>
@@ -2661,7 +2830,7 @@ export default function Home() {
                   {editing
                     ? "Update record"
                     : view === "sales" && saleLines.length > 1
-                      ? `${common.save} · ${saleLines.length} ${sales.itemsWord} · ${yen(saleLinesTotal)}`
+                      ? `${common.save} · ${count(saleLines.length, sales.itemWord, sales.itemsWord)} · ${yen(saleLinesTotal)}`
                       : common.save}
                 </button>
                 {editing && (
@@ -2851,30 +3020,217 @@ export default function Home() {
             </article>
             <article className="finance-card">
               {view === "sales" && (
-                <>
-                  <SectionTitle title={sales.bills} detail={sales.billsDetail} />
-                  <div className="summary-list bill-list">
-                    {customerBills.length ? (
-                      customerBills.slice(0, 12).map((bill) => (
-                        <p className="crop-row" key={bill.key}>
-                          <span>
-                            <b>
-                              {bill.customer} · {bill.items.length}{" "}
-                              {sales.itemsWord}
-                              {bill.pending ? ` · ${sales.pending}` : ""}
-                            </b>
-                            <small>
-                              {bill.date} · {bill.items.join(", ")}
-                            </small>
-                          </span>
-                          <b>{yen(bill.total)}</b>
-                        </p>
-                      ))
-                    ) : (
-                      <p className="empty-copy">{common.noRecords}</p>
-                    )}
-                  </div>
-                </>
+                <div className="customer-dash">
+                  <SectionTitle
+                    title={sales.customers}
+                    detail={sales.customersDetail}
+                  />
+                  {customers.length ? (
+                    <>
+                      <div className="customer-tiles">
+                        <article>
+                          <span>{sales.buyers}</span>
+                          <b>{customers.length}</b>
+                          <small>
+                            {count(
+                              customers.reduce(
+                                (total, customer) => total + customer.visits,
+                                0,
+                              ),
+                              sales.visit,
+                              sales.visits,
+                            )}
+                          </small>
+                        </article>
+                        <article>
+                          <span>{sales.topBuyer}</span>
+                          <b>{topCustomer.name}</b>
+                          <small>
+                            {yen(topCustomer.total)} ·{" "}
+                            {count(
+                              topCustomer.visits,
+                              sales.visit,
+                              sales.visits,
+                            )}
+                          </small>
+                        </article>
+                        <article>
+                          <span>{sales.repeat}</span>
+                          <b>
+                            {
+                              customers.filter(
+                                (customer) => customer.visits > 1,
+                              ).length
+                            }
+                          </b>
+                          <small>
+                            {sales.total} {yen(customerSales)}
+                          </small>
+                        </article>
+                        <article
+                          className={
+                            customers.some((customer) => customer.pending > 0)
+                              ? "tile-warn"
+                              : ""
+                          }
+                        >
+                          <span>{sales.unpaid}</span>
+                          <b>
+                            {yen(
+                              customers.reduce(
+                                (total, customer) => total + customer.pending,
+                                0,
+                              ),
+                            )}
+                          </b>
+                          <small>
+                            {count(
+                              customers.filter(
+                                (customer) => customer.pending > 0,
+                              ).length,
+                              sales.buyer,
+                              sales.buyer,
+                            )}
+                          </small>
+                        </article>
+                      </div>
+                      <input
+                        className="customer-search"
+                        value={customerQuery}
+                        onChange={(event) =>
+                          setCustomerQuery(event.target.value)
+                        }
+                        placeholder={sales.search}
+                        aria-label={sales.search}
+                      />
+                      <div className="customer-list">
+                        {shownCustomers.map((customer) => {
+                          const open = openCustomer === customer.key;
+                          return (
+                            <article
+                              className={
+                                open ? "customer-card open" : "customer-card"
+                              }
+                              key={customer.key}
+                            >
+                              <button
+                                type="button"
+                                className="customer-head"
+                                onClick={() =>
+                                  setOpenCustomer(open ? null : customer.key)
+                                }
+                              >
+                                <span className="customer-avatar">
+                                  {initialsOf(customer.name)}
+                                </span>
+                                <span className="customer-name">
+                                  <b>{customer.name}</b>
+                                  <small>
+                                    {count(
+                                      customer.visits,
+                                      sales.visit,
+                                      sales.visits,
+                                    )}{" "}
+                                    ·{" "}
+                                    {count(
+                                      customer.items,
+                                      sales.itemWord,
+                                      sales.itemsWord,
+                                    )}{" "}
+                                    · {sales.lastBuy} {customer.lastDate}
+                                  </small>
+                                  <i className="customer-share">
+                                    <em
+                                      style={{
+                                        width: `${Math.max(3, (customer.total / Math.max(1, customers[0].total)) * 100)}%`,
+                                      }}
+                                    />
+                                  </i>
+                                </span>
+                                <span className="customer-money">
+                                  <b>{yen(customer.total)}</b>
+                                  <small>
+                                    {customerSales
+                                      ? `${Math.round((customer.total / customerSales) * 100)}% ${sales.share}`
+                                      : sales.share}
+                                  </small>
+                                  {customer.pending > 0 && (
+                                    <em>
+                                      {sales.pending} {yen(customer.pending)}
+                                    </em>
+                                  )}
+                                </span>
+                                <span className="customer-toggle">
+                                  {open ? sales.close : sales.open}
+                                </span>
+                              </button>
+                              {open && (
+                                <div className="customer-body">
+                                  <div className="customer-crops">
+                                    <span className="customer-crops-label">
+                                      {sales.mostBought}
+                                    </span>
+                                    {customer.crops
+                                      .slice(0, 5)
+                                      .map(([crop, amount]) => (
+                                        <span
+                                          className="customer-crop"
+                                          key={crop}
+                                        >
+                                          {crop} <b>{yen(amount)}</b>
+                                        </span>
+                                      ))}
+                                  </div>
+                                  <SectionTitle
+                                    title={sales.bills}
+                                    detail={sales.billsDetail}
+                                  />
+                                  <div className="summary-list bill-list">
+                                    {customer.bills.map((bill) => (
+                                      <p className="crop-row" key={bill.key}>
+                                        <span>
+                                          <b>
+                                            {bill.date} ·{" "}
+                                            {count(
+                                              bill.items.length,
+                                              sales.itemWord,
+                                              sales.itemsWord,
+                                            )}
+                                            {bill.pending
+                                              ? ` · ${sales.pending}`
+                                              : ""}
+                                          </b>
+                                          <small>{bill.items.join(", ")}</small>
+                                        </span>
+                                        <b>{yen(bill.total)}</b>
+                                      </p>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </article>
+                          );
+                        })}
+                        {!shownCustomers.length && (
+                          <p className="empty-copy">{common.noRecords}</p>
+                        )}
+                      </div>
+                      {!customerQuery && matchedCustomers.length > 8 && (
+                        <button
+                          type="button"
+                          className="finance-button secondary customer-more"
+                          onClick={() => setAllCustomers(!allCustomers)}
+                        >
+                          {allCustomers
+                            ? sales.showTop
+                            : `${sales.showAll} (${matchedCustomers.length})`}
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <p className="empty-copy">{sales.noCustomer}</p>
+                  )}
+                </div>
               )}
               <SectionTitle
                 title={`${labels[language][view]} ${language === "ja" ? "詳細" : language === "bn" ? "বিবরণ" : "details"}`}
