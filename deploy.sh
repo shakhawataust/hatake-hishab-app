@@ -34,13 +34,17 @@ say "Step 2 of 4: Linking this folder to a Vercel project"
 $VC link --yes
 
 say "Step 3 of 4: Uploading Supabase settings"
+# These two values are meant to reach the browser, and Vercel refuses to store
+# a NEXT_PUBLIC_ name as a secret, so ask for plain config visibility. Without
+# the flags the CLI defaults new variables to sensitive and rejects them.
+PUBLIC="--visibility config --no-sensitive"
 # Remove any stale values first so re-running this script stays safe.
 for target in production preview development; do
   for name in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY; do
     $VC env rm "$name" "$target" --yes >/dev/null 2>&1 || true
   done
-  printf '%s' "$SUPABASE_URL" | $VC env add NEXT_PUBLIC_SUPABASE_URL "$target" >/dev/null
-  printf '%s' "$SUPABASE_KEY" | $VC env add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY "$target" >/dev/null
+  printf '%s' "$SUPABASE_URL" | $VC env add NEXT_PUBLIC_SUPABASE_URL "$target" $PUBLIC >/dev/null
+  printf '%s' "$SUPABASE_KEY" | $VC env add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY "$target" $PUBLIC >/dev/null
   echo "set for $target"
 done
 
