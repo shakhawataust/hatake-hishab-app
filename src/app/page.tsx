@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -353,6 +353,9 @@ const commonText: Record<
     chooseFromList: string;
     paidBy: string;
     spentBy: string;
+    selectCrop: string;
+    newCrop: string;
+    newCropName: string;
   }
 > = {
   bn: {
@@ -376,6 +379,9 @@ const commonText: Record<
     chooseFromList: "তালিকা থেকে বেছে নিন",
     paidBy: "কে টাকা দিয়েছে",
     spentBy: "কে কত খরচ করেছে",
+    selectCrop: "ফসল নির্বাচন করুন",
+    newCrop: "＋ নতুন ফসল",
+    newCropName: "নতুন ফসলের নাম",
   },
   en: {
     date: "Date",
@@ -398,6 +404,9 @@ const commonText: Record<
     chooseFromList: "Choose from the list",
     paidBy: "Paid by",
     spentBy: "Who spent how much",
+    selectCrop: "Select crop",
+    newCrop: "＋ New crop",
+    newCropName: "New crop name",
   },
   ja: {
     date: "日付",
@@ -420,6 +429,9 @@ const commonText: Record<
     chooseFromList: "一覧から選ぶ",
     paidBy: "支払者",
     spentBy: "誰がいくら使ったか",
+    selectCrop: "作物を選択",
+    newCrop: "＋ 新しい作物",
+    newCropName: "新しい作物名",
   },
 };
 // One customer usually buys several crops at once, so the sales form keeps a
@@ -1033,19 +1045,22 @@ export default function Home() {
   const [customerQuery, setCustomerQuery] = useState("");
   const [openCustomer, setOpenCustomer] = useState<string | null>(null);
   const [allCustomers, setAllCustomers] = useState(false);
-  const resetSaleLines = () =>
-    setSaleLines([{ id: 1, crop: "", amount: "", quantity: "", unit: "" }]);
+  // Line ids never repeat, not even after a save, so an emptied form mounts
+  // fresh fields instead of reusing the last one's "typing a new crop" state.
+  const lastSaleLineId = useRef(1);
+  const blankSaleLine = (unit = ""): SaleLine => ({
+    id: (lastSaleLineId.current += 1),
+    crop: "",
+    amount: "",
+    quantity: "",
+    unit,
+  });
+  const resetSaleLines = () => setSaleLines([blankSaleLine()]);
   const addSaleLine = () =>
     setSaleLines((lines) => [
       ...lines,
-      {
-        id: lines.reduce((highest, line) => Math.max(highest, line.id), 0) + 1,
-        crop: "",
-        amount: "",
-        quantity: "",
-        // The next crop usually goes out in the same unit as the last one.
-        unit: lines[lines.length - 1]?.unit ?? "",
-      },
+      // The next crop usually goes out in the same unit as the last one.
+      blankSaleLine(lines[lines.length - 1]?.unit ?? ""),
     ]);
   const removeSaleLine = (id: number) =>
     setSaleLines((lines) =>
@@ -1930,11 +1945,10 @@ export default function Home() {
     if (entry.kind === "sale")
       setSaleLines([
         {
-          id: 1,
+          ...blankSaleLine(entry.unit ?? ""),
           crop: entry.crop ?? "",
           amount: entry.amount === null ? "" : String(entry.amount),
           quantity: entry.quantity === null ? "" : String(entry.quantity),
-          unit: entry.unit ?? "",
         },
       ]);
     setNotice("Editing a saved record.");
@@ -2138,6 +2152,25 @@ export default function Home() {
     .filter((customer) => customer.key !== customerKey(unknownHolder))
     .map((customer) => customer.name)
     .sort((a, b) => a.localeCompare(b));
+  // The starting crop list plus every crop the farm has since recorded, so a
+  // crop entered once is a choice in every crop dropdown from then on. Expense
+  // rows keep their category in `crop`, not a crop name, so they stay out.
+  const knownCrops = (() => {
+    const builtIn = crops.filter((crop) => crop !== "Other");
+    const recorded = [
+      ...entries
+        .filter((entry) => entry.kind !== "expense")
+        .map((entry) => entry.crop),
+      ...batches.map((batch) => batch.crop),
+      ...orders.map((order) => order.crop),
+      ...careAlerts.map((alert) => alert.crop),
+    ].filter((crop): crop is string => Boolean(crop));
+    const extra = [...new Set(recorded)]
+      .filter((crop) => crop !== "Other" && !builtIn.includes(crop))
+      .sort((a, b) => a.localeCompare(b));
+    // "Other" belongs at the bottom, under the crops actually grown.
+    return [...builtIn, ...extra, "Other"];
+  })();
 
   if (!supabase)
     return (
@@ -2792,15 +2825,13 @@ export default function Home() {
                       required
                     />
                   </label>
-                  <label>
-                    Crop / ফসল
-                    <select name="crop" defaultValue="">
-                      <option value="">General / all crops</option>
-                      {crops.map((crop) => (
-                        <option key={crop}>{crop}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <CropSelect
+                    name="crop"
+                    label="Crop / ফসল"
+                    options={knownCrops}
+                    words={common}
+                    emptyLabel="General / all crops"
+                  />
                   <label>
                     Note
                     <input
@@ -2907,31 +2938,15 @@ export default function Home() {
                             </button>
                           )}
                         </div>
-                        <label className="full">
-                          {common.crop}
-                          <select
-                            required
-                            value={line.crop}
-                            onChange={(event) =>
-                              changeSaleLine(line.id, {
-                                crop: event.target.value,
-                              })
-                            }
-                          >
-                            <option value="" disabled>
-                              {language === "ja"
-                                ? "作物を選択"
-                                : language === "bn"
-                                  ? "ফসল নির্বাচন করুন"
-                                  : "Select crop"}
-                            </option>
-                            {withOption(crops, line.crop).map((crop) => (
-                              <option key={crop} value={crop}>
-                                {crop}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                        <CropSelect
+                          label={common.crop}
+                          options={knownCrops}
+                          words={common}
+                          className="full"
+                          required
+                          value={line.crop}
+                          onChange={(crop) => changeSaleLine(line.id, { crop })}
+                        />
                         <label>
                           {common.amount}
                           <input
@@ -2998,9 +3013,9 @@ export default function Home() {
                   </div>
                 ) : (
                   <>
-                    <label>
-                      {view === "expense" ? common.category : common.crop}
-                      {view === "expense" ? (
+                    {view === "expense" ? (
+                      <label>
+                        {common.category}
                         <select
                           name="crop"
                           required
@@ -3017,27 +3032,17 @@ export default function Home() {
                             <option key={category}>{category}</option>
                           ))}
                         </select>
-                      ) : (
-                        <select
-                          name="crop"
-                          required
-                          defaultValue={editing?.crop ?? ""}
-                        >
-                          <option value="" disabled>
-                            {language === "ja"
-                              ? "作物を選択"
-                              : language === "bn"
-                                ? "ফসল নির্বাচন করুন"
-                                : "Select crop"}
-                          </option>
-                          {cropOptions(crops).map((crop) => (
-                            <option key={crop} value={crop}>
-                              {crop}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </label>
+                      </label>
+                    ) : (
+                      <CropSelect
+                        name="crop"
+                        label={common.crop}
+                        options={knownCrops}
+                        words={common}
+                        required
+                        defaultValue={editing?.crop ?? ""}
+                      />
+                    )}
                     <label>
                       {view === "harvest"
                         ? `${common.amount} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
@@ -3661,21 +3666,20 @@ export default function Home() {
                     }
                   />
                 </label>
-                <label>
-                  {labor.crop}
-                  <select name="crop" defaultValue={editing?.crop ?? ""}>
-                    <option value="">
-                      {language === "ja"
-                        ? "一般"
-                        : language === "bn"
-                          ? "সাধারণ"
-                          : "General"}
-                    </option>
-                    {cropOptions(crops).map((crop) => (
-                      <option key={crop}>{crop}</option>
-                    ))}
-                  </select>
-                </label>
+                <CropSelect
+                  name="crop"
+                  label={labor.crop}
+                  options={knownCrops}
+                  words={common}
+                  defaultValue={editing?.crop ?? ""}
+                  emptyLabel={
+                    language === "ja"
+                      ? "一般"
+                      : language === "bn"
+                        ? "সাধারণ"
+                        : "General"
+                  }
+                />
                 <label className="full">
                   {labor.task}
                   <input
@@ -3812,21 +3816,14 @@ export default function Home() {
                     planned tasks stay as they are.
                   </p>
                 )}
-                <label>
-                  {common.crop}
-                  <select
-                    name="crop"
-                    required
-                    defaultValue={editingBatch?.crop ?? ""}
-                  >
-                    <option value="" disabled>
-                      Select crop
-                    </option>
-                    {withOption(crops, editingBatch?.crop).map((crop) => (
-                      <option key={crop}>{crop}</option>
-                    ))}
-                  </select>
-                </label>
+                <CropSelect
+                  name="crop"
+                  label={common.crop}
+                  options={knownCrops}
+                  words={common}
+                  required
+                  defaultValue={editingBatch?.crop ?? ""}
+                />
                 <label>
                   Variety / 品種
                   <input
@@ -4273,15 +4270,13 @@ export default function Home() {
                     ))}
                   </datalist>
                 </label>
-                <label>
-                  {common.crop}
-                  <select name="crop" defaultValue="">
-                    <option value="">Select crop</option>
-                    {crops.map((crop) => (
-                      <option key={crop}>{crop}</option>
-                    ))}
-                  </select>
-                </label>
+                <CropSelect
+                  name="crop"
+                  label={common.crop}
+                  options={knownCrops}
+                  words={common}
+                  emptyLabel={common.selectCrop}
+                />
                 <label>
                   Quantity
                   <input name="quantity" type="number" min="0" step="0.01" />
@@ -5156,6 +5151,99 @@ function HolderSelect({
           type="button"
           className="link-button"
           onClick={() => setTyped(null)}
+        >
+          {words.chooseFromList}
+        </button>
+      )}
+    </label>
+  );
+}
+// The farm plants something new every season, so the crop list is not fixed:
+// the dropdown holds every crop already on record and "＋ New crop" types in one
+// nobody has grown yet. Saving that record puts the crop in the list for good.
+const newCropOption = "__new_crop__";
+function CropSelect({
+  label,
+  options,
+  words,
+  name,
+  value,
+  onChange,
+  defaultValue = "",
+  required = false,
+  emptyLabel,
+  className,
+}: {
+  label: string;
+  options: string[];
+  words: (typeof commonText)[Language];
+  // Sale lines keep their crop in React state; every other form reads it off
+  // the submitted form, so both bindings are supported.
+  name?: string;
+  value?: string;
+  onChange?: (crop: string) => void;
+  defaultValue?: string;
+  required?: boolean;
+  // The text of the blank first option, for the forms where "no crop" is a
+  // valid answer. Omitted means a crop must be picked.
+  emptyLabel?: string;
+  className?: string;
+}) {
+  const held = value ?? defaultValue;
+  // A saved record can name a crop that has since dropped off the list.
+  const listed = held && !options.includes(held) ? [held, ...options] : options;
+  const [typing, setTyping] = useState(false);
+  const pick = (next: string) => {
+    if (next === newCropOption) {
+      setTyping(true);
+      onChange?.("");
+      return;
+    }
+    onChange?.(next);
+  };
+  return (
+    <label className={className}>
+      {label}
+      {typing ? (
+        <input
+          name={name}
+          required={required}
+          placeholder={words.newCropName}
+          autoFocus
+          {...(onChange
+            ? { value: value ?? "", onChange: (e) => onChange(e.target.value) }
+            : { defaultValue: "" })}
+        />
+      ) : (
+        <select
+          name={name}
+          required={required}
+          onChange={(event) => pick(event.target.value)}
+          {...(onChange ? { value: value ?? "" } : { defaultValue })}
+        >
+          {emptyLabel === undefined ? (
+            <option value="" disabled>
+              {words.selectCrop}
+            </option>
+          ) : (
+            <option value="">{emptyLabel}</option>
+          )}
+          {listed.map((crop) => (
+            <option key={crop} value={crop}>
+              {crop}
+            </option>
+          ))}
+          <option value={newCropOption}>{words.newCrop}</option>
+        </select>
+      )}
+      {typing && (
+        <button
+          type="button"
+          className="link-button"
+          onClick={() => {
+            setTyping(false);
+            onChange?.("");
+          }}
         >
           {words.chooseFromList}
         </button>
