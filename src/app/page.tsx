@@ -894,6 +894,9 @@ const initialsOf = (name: string) =>
     .join("") || "?";
 const noteLabels = [
   "Customer",
+  // Imported rows name the buyer "Buyer"; editing one rewrites it as "Customer",
+  // so the old label must not survive in the free note as well.
+  "Buyer",
   "Channel",
   "Payment",
   "Cash with",
@@ -2129,6 +2132,12 @@ export default function Home() {
       ].filter(Boolean),
     ),
   ].sort();
+  // Buyers who have bought before, picked from a list instead of retyped. The
+  // list is built from the saved sales, so a new customer joins it on save.
+  const knownCustomers = customers
+    .filter((customer) => customer.key !== customerKey(unknownHolder))
+    .map((customer) => customer.name)
+    .sort((a, b) => a.localeCompare(b));
 
   if (!supabase)
     return (
@@ -3077,14 +3086,17 @@ export default function Home() {
                 )}
                 {view === "sales" && (
                   <>
-                    <label>
-                      Customer
-                      <input
-                        name="customer"
-                        placeholder="Community / Restaurant"
-                        defaultValue={editField("Customer")}
-                      />
-                    </label>
+                    {/* Full width: buyer names are long and the form column is
+                        narrow, so a half-width dropdown would clip them. */}
+                    <HolderSelect
+                      name="customer"
+                      label={common.customer}
+                      options={knownCustomers}
+                      words={common}
+                      className="full"
+                      placeholder="Community / Restaurant"
+                      defaultValue={editField("Customer") || editField("Buyer")}
+                    />
                     <label>
                       Channel
                       <select
@@ -5090,6 +5102,7 @@ function HolderSelect({
   defaultValue = "",
   required = false,
   placeholder,
+  className,
 }: {
   name: string;
   label: string;
@@ -5098,6 +5111,7 @@ function HolderSelect({
   defaultValue?: string;
   required?: boolean;
   placeholder?: string;
+  className?: string;
 }) {
   // A saved record can name someone who has since been removed from the list.
   const listed =
@@ -5110,7 +5124,7 @@ function HolderSelect({
     listed.length ? null : defaultValue,
   );
   return (
-    <label>
+    <label className={className}>
       {label}
       {typed !== null ? (
         <input
