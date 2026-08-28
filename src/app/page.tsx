@@ -91,7 +91,10 @@ type SaleLine = {
 };
 type ReportScope = "month" | "all";
 type Language = "bn" | "en" | "ja";
-type MemberRole = "admin" | "accountant" | "field_member" | "sales";
+// "viewer" is the read-only role: every page stays visible, every form and
+// delete button disappears. supabase/view-only-role.sql enforces the same rule
+// in the database so the restriction is not just a hidden button.
+type MemberRole = "admin" | "accountant" | "field_member" | "sales" | "viewer";
 type View =
   | "dashboard"
   | "expense"
@@ -1036,7 +1039,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
+  const [mode, setMode] = useState<"signIn" | "signUp" | "reset">("signIn");
+  // A password-reset link signs the member in with a session whose only purpose
+  // is choosing a new password, so that panel replaces the whole app until the
+  // new password is saved.
+  const [recovery, setRecovery] = useState(false);
   const [view, setView] = useState<View>("dashboard");
   const [language, setLanguage] = useState<Language>("bn");
   const [saleLines, setSaleLines] = useState<SaleLine[]>([
@@ -1074,6 +1081,10 @@ export default function Home() {
     (total, line) => total + (Number(line.amount) || 0),
     0,
   );
+  // A viewer reads everything and writes nothing. The database refuses their
+  // writes anyway; these checks keep the interface from offering what would only
+  // come back as a permission error.
+  const readOnly = farm?.role === "viewer";
 
   async function loadWorkspace() {
     if (!supabase) return;
@@ -1168,13 +1179,32 @@ export default function Home() {
       void loadWorkspace();
     }, 0);
     if (!supabase) return;
-    const { data } = supabase.auth.onAuthStateChange(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
       void loadWorkspace();
     });
     return () => {
       window.clearTimeout(timer);
       data.subscription.unsubscribe();
     };
+  }, []);
+
+  // The reset email sends the member back to this page. `type=recovery` is our
+  // own marker on that redirect URL, so the "set a new password" panel opens
+  // even before Supabase has finished exchanging the code in the address bar.
+  // A dead or already-used link comes back with an error instead, and that is
+  // worth showing rather than silently landing on the sign-in form.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(
+        `${window.location.search}${window.location.hash.replace("#", "&")}`,
+      );
+      if (params.get("type") === "recovery") setRecovery(true);
+      const linkError =
+        params.get("error_description") ?? params.get("error") ?? "";
+      if (linkError) setNotice(linkError.replace(/\+/g, " "));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -1218,11 +1248,28 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  // Where Supabase sends the member back after they click the link in the reset
+  // email. The address has to be on the project's redirect allow-list.
+  const recoveryRedirect = () => `${window.location.origin}/?type=recovery`;
+
   async function authenticate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
     const form = new FormData(event.currentTarget);
     setBusy(true);
+    if (mode === "reset") {
+      const address = String(form.get("email"));
+      const sent = await supabase.auth.resetPasswordForEmail(address, {
+        redirectTo: recoveryRedirect(),
+      });
+      setBusy(false);
+      setNotice(
+        sent.error
+          ? sent.error.message
+          : `Reset link sent to ${address}. Open it in this same browser, then choose a new password.`,
+      );
+      return;
+    }
     const result =
       mode === "signIn"
         ? await supabase.auth.signInWithPassword({
@@ -1244,6 +1291,75 @@ export default function Home() {
     );
   }
 
+  // Saves the password chosen after following a reset link. The recovery session
+  // is already active at this point, so no current password is asked for — the
+  // emailed link is the proof.
+  async function completeRecovery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) return;
+    const form = new FormData(event.currentTarget);
+    const next = String(form.get("password"));
+    if (next !== String(form.get("confirm"))) {
+      setNotice("The two passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    const result = await supabase.auth.updateUser({ password: next });
+    setBusy(false);
+    if (result.error) {
+      setNotice(result.error.message);
+      return;
+    }
+    setRecovery(false);
+    // Drop the recovery marker so a reload does not reopen this panel.
+    window.history.replaceState({}, "", window.location.pathname);
+    setNotice("Password updated. You are signed in.");
+    await loadWorkspace();
+  }
+
+  // Changing the password from inside the app asks for the current one first.
+  // Supabase does not require it, but an unattended laptop should not be enough
+  // to take over a member's account.
+  async function changePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !email) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const next = String(form.get("password"));
+    if (next !== String(form.get("confirm"))) {
+      setNotice("The two new passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    const check = await supabase.auth.signInWithPassword({
+      email,
+      password: String(form.get("current")),
+    });
+    if (check.error) {
+      setBusy(false);
+      setNotice("The current password is not correct.");
+      return;
+    }
+    const result = await supabase.auth.updateUser({ password: next });
+    setBusy(false);
+    setNotice(result.error ? result.error.message : "Password changed.");
+    if (!result.error) formElement.reset();
+  }
+
+  // For a signed-in member who cannot remember the current password: mail the
+  // reset link to their own address instead of making them sign out first.
+  async function sendOwnResetLink() {
+    if (!supabase || !email) return;
+    setBusy(true);
+    const result = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: recoveryRedirect(),
+    });
+    setBusy(false);
+    setNotice(
+      result.error ? result.error.message : `Reset link sent to ${email}.`,
+    );
+  }
+
   async function createFarm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
@@ -1261,7 +1377,7 @@ export default function Home() {
 
   async function saveEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const { data: sessionData } = await supabase.auth.getSession();
@@ -1345,7 +1461,7 @@ export default function Home() {
 
   async function saveLabor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const { data: sessionData } = await supabase.auth.getSession();
@@ -1387,7 +1503,7 @@ export default function Home() {
   }
 
   async function deleteEntry(id: string) {
-    if (!supabase || !window.confirm("Delete this record?")) return;
+    if (!supabase || readOnly || !window.confirm("Delete this record?")) return;
     setBusy(true);
     const result = await supabase.from("transactions").delete().eq("id", id);
     setBusy(false);
@@ -1397,7 +1513,7 @@ export default function Home() {
 
   async function saveHandover(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const fromHolder = String(form.get("from_holder")).trim();
@@ -1442,7 +1558,8 @@ export default function Home() {
   }
 
   async function deleteHandover(id: string) {
-    if (!supabase || !window.confirm("Delete this handover?")) return;
+    if (!supabase || readOnly || !window.confirm("Delete this handover?"))
+      return;
     setBusy(true);
     const result = await supabase.from("cash_handovers").delete().eq("id", id);
     setBusy(false);
@@ -1453,6 +1570,7 @@ export default function Home() {
   async function deleteBatch(id: string) {
     if (
       !supabase ||
+      readOnly ||
       !window.confirm("Delete this crop batch and all of its planned tasks?")
     )
       return;
@@ -1465,7 +1583,7 @@ export default function Home() {
 
   async function saveCropTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     setBusy(true);
@@ -1500,7 +1618,7 @@ export default function Home() {
   }
 
   async function completeCropTask(task: CropTask) {
-    if (!supabase) return;
+    if (!supabase || readOnly) return;
     setBusy(true);
     const result = await supabase
       .from("crop_tasks")
@@ -1518,7 +1636,8 @@ export default function Home() {
   }
 
   async function deleteCropTask(id: string) {
-    if (!supabase || !window.confirm("Delete this farm task?")) return;
+    if (!supabase || readOnly || !window.confirm("Delete this farm task?"))
+      return;
     setBusy(true);
     const result = await supabase.from("crop_tasks").delete().eq("id", id);
     setBusy(false);
@@ -1528,7 +1647,7 @@ export default function Home() {
 
   async function addFarmMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     setBusy(true);
@@ -1548,7 +1667,7 @@ export default function Home() {
 
   async function saveBatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const { data: sessionData } = await supabase.auth.getSession();
@@ -1665,7 +1784,7 @@ export default function Home() {
 
   async function saveInventory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     setBusy(true);
@@ -1686,7 +1805,7 @@ export default function Home() {
 
   async function saveOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     setBusy(true);
@@ -1709,6 +1828,7 @@ export default function Home() {
 
   function saveCareAlert(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const alert: CareAlert = {
@@ -1726,11 +1846,13 @@ export default function Home() {
   }
 
   function removeCareAlert(id: string) {
+    if (readOnly) return;
     setCareAlerts((current) => current.filter((alert) => alert.id !== id));
   }
 
   function saveInvestment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (readOnly) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     const item: Investment = {
@@ -1749,6 +1871,7 @@ export default function Home() {
   }
 
   function removeInvestment(id: string) {
+    if (readOnly) return;
     setInvestments((current) => current.filter((item) => item.id !== id));
   }
 
@@ -1774,7 +1897,7 @@ export default function Home() {
   }
 
   async function import2026Workbook() {
-    if (!supabase || !farm) return;
+    if (!supabase || !farm || readOnly) return;
     const imported = workbook2026Entries.filter(
       (item) =>
         !entries.some(
@@ -2190,13 +2313,60 @@ export default function Home() {
         <section className="empty">Loading Hatake Hishab…</section>
       </main>
     );
+  // Reached by following the link in the reset email. The link itself is the
+  // proof of identity, so this panel only asks for the new password.
+  if (recovery && email)
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <p className="eyebrow">Hatake Hishab</p>
+          <h1>Set a new password</h1>
+          <p>
+            Signed in as {email}. Choose a password of at least 8 characters.
+          </p>
+          <form onSubmit={completeRecovery} className="form">
+            <label>
+              New password
+              <input name="password" type="password" minLength={8} required />
+            </label>
+            <label>
+              Repeat new password
+              <input name="confirm" type="password" minLength={8} required />
+            </label>
+            <button className="primary" disabled={busy}>
+              {busy ? "Please wait…" : "Save new password"}
+            </button>
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => {
+                setRecovery(false);
+                window.history.replaceState({}, "", window.location.pathname);
+                setNotice("");
+              }}
+            >
+              Keep the old password
+            </button>
+          </form>
+          {notice && <p className="notice">{notice}</p>}
+        </section>
+      </main>
+    );
   if (!email)
     return (
       <main className="auth-shell">
         <section className="auth-panel">
           <p className="eyebrow">Hatake Hishab</p>
-          <h1>Shared farm management</h1>
-          <p>Secure access for your farm team.</p>
+          <h1>
+            {mode === "reset"
+              ? "Reset your password"
+              : "Shared farm management"}
+          </h1>
+          <p>
+            {mode === "reset"
+              ? "Enter the email you signed up with and we will send a reset link."
+              : "Secure access for your farm team."}
+          </p>
           <div className="tabs">
             <button
               className={mode === "signIn" ? "active" : ""}
@@ -2210,24 +2380,55 @@ export default function Home() {
             >
               Create account
             </button>
+            <button
+              className={mode === "reset" ? "active" : ""}
+              onClick={() => setMode("reset")}
+            >
+              Forgot password
+            </button>
           </div>
           <form onSubmit={authenticate} className="form">
             <label>
               Email
               <input name="email" type="email" required />
             </label>
-            <label>
-              Password
-              <input name="password" type="password" minLength={8} required />
-            </label>
+            {mode !== "reset" && (
+              <label>
+                Password
+                <input name="password" type="password" minLength={8} required />
+              </label>
+            )}
             <button className="primary" disabled={busy}>
               {busy
                 ? "Please wait…"
                 : mode === "signIn"
                   ? "Sign in"
-                  : "Create account"}
+                  : mode === "signUp"
+                    ? "Create account"
+                    : "Send reset link"}
             </button>
+            {mode === "signIn" && (
+              <button
+                type="button"
+                className="auth-link"
+                onClick={() => {
+                  setMode("reset");
+                  setNotice("");
+                }}
+              >
+                Forgot your password?
+              </button>
+            )}
           </form>
+          {/* A recovery link opened in another browser or after it expired
+              arrives without a session, so say what to do next. */}
+          {recovery && (
+            <p className="notice">
+              That reset link could not be opened here. Reset links work only in
+              the browser that asked for them, and they expire — request a new
+              one above.
+            </p>
+          )}
           {notice && <p className="notice">{notice}</p>}
         </section>
       </main>
@@ -2500,6 +2701,20 @@ export default function Home() {
     setLanguage(next);
     window.localStorage.setItem("hatake-hishab-language", next);
   };
+  // Shown wherever a form or a delete button would sit for an editing member,
+  // so a viewer sees why the page is only a page.
+  const viewerNote =
+    language === "bn"
+      ? "আপনার অ্যাকাউন্ট শুধু দেখার জন্য। নতুন তথ্য যোগ বা পরিবর্তন করতে অ্যাডমিনকে বলুন।"
+      : language === "ja"
+        ? "このアカウントは閲覧専用です。追加や変更が必要な場合は管理者に依頼してください。"
+        : "Your account is view-only. Ask an Admin if a record needs to be added or changed.";
+  const viewerFlag =
+    language === "bn"
+      ? "শুধু দেখা"
+      : language === "ja"
+        ? "閲覧専用"
+        : "View only";
 
   return (
     <main className="finance-app">
@@ -2515,6 +2730,7 @@ export default function Home() {
           <b>{email}</b>
           <span>{farm.name}</span>
           <span>{farm.role.replace("_", " ")}</span>
+          {readOnly && <em className="viewer-flag">{viewerFlag}</em>}
         </div>
         <nav className="finance-nav">
           {views.map((item) => (
@@ -2555,12 +2771,14 @@ export default function Home() {
             <button className="finance-button secondary" onClick={exportCsv}>
               {text.export}
             </button>
-            <button
-              className="finance-button"
-              onClick={() => changeView("expense")}
-            >
-              {text.expense}
-            </button>
+            {!readOnly && (
+              <button
+                className="finance-button"
+                onClick={() => changeView("expense")}
+              >
+                {text.expense}
+              </button>
+            )}
             <button
               className="finance-button secondary"
               onClick={() => void supabase.auth.signOut()}
@@ -2764,7 +2982,7 @@ export default function Home() {
                 <EntriesTable
                   entries={entries.slice(0, 8)}
                   busy={busy}
-                  onDelete={deleteEntry}
+                  onDelete={readOnly ? undefined : deleteEntry}
                 />
               </article>
               <article className="finance-card">
@@ -2807,42 +3025,45 @@ export default function Home() {
                   title="Farm care schedule"
                   detail="Fertilizer · insect medicine · harvest"
                 />
-                <form className="finance-form" onSubmit={saveCareAlert}>
-                  <label>
-                    Action
-                    <select name="type" defaultValue="Fertilizer">
-                      <option>Fertilizer</option>
-                      <option>Insect medicine</option>
-                      <option>Harvest</option>
-                    </select>
-                  </label>
-                  <label>
-                    Due date
-                    <input
-                      name="due_on"
-                      type="date"
-                      defaultValue={today()}
-                      required
+                {readOnly && <p className="small-pro">{viewerNote}</p>}
+                {!readOnly && (
+                  <form className="finance-form" onSubmit={saveCareAlert}>
+                    <label>
+                      Action
+                      <select name="type" defaultValue="Fertilizer">
+                        <option>Fertilizer</option>
+                        <option>Insect medicine</option>
+                        <option>Harvest</option>
+                      </select>
+                    </label>
+                    <label>
+                      Due date
+                      <input
+                        name="due_on"
+                        type="date"
+                        defaultValue={today()}
+                        required
+                      />
+                    </label>
+                    <CropSelect
+                      name="crop"
+                      label="Crop / ফসল"
+                      options={knownCrops}
+                      words={common}
+                      emptyLabel="General / all crops"
                     />
-                  </label>
-                  <CropSelect
-                    name="crop"
-                    label="Crop / ফসল"
-                    options={knownCrops}
-                    words={common}
-                    emptyLabel="General / all crops"
-                  />
-                  <label>
-                    Note
-                    <input
-                      name="note"
-                      placeholder="Product, dose, field, or harvest plan"
-                    />
-                  </label>
-                  <button className="finance-button full">
-                    Schedule alert
-                  </button>
-                </form>
+                    <label>
+                      Note
+                      <input
+                        name="note"
+                        placeholder="Product, dose, field, or harvest plan"
+                      />
+                    </label>
+                    <button className="finance-button full">
+                      Schedule alert
+                    </button>
+                  </form>
+                )}
                 <button
                   className="finance-button secondary alert-enable"
                   onClick={() => void enableBrowserAlerts()}
@@ -2871,12 +3092,14 @@ export default function Home() {
                           </span>
                           <small>{alert.note || "No note"}</small>
                         </div>
-                        <button
-                          className="table-delete"
-                          onClick={() => removeCareAlert(alert.id)}
-                        >
-                          Done
-                        </button>
+                        {!readOnly && (
+                          <button
+                            className="table-delete"
+                            onClick={() => removeCareAlert(alert.id)}
+                          >
+                            Done
+                          </button>
+                        )}
                       </div>
                     ))
                   ) : (
@@ -2901,301 +3124,310 @@ export default function Home() {
                       : "Expense + payment details"
                 }
               />
-              <form
-                className="finance-form"
-                onSubmit={saveEntry}
-                key={editing?.id ?? "new"}
-              >
-                <input type="hidden" name="kind" value={selectedKind} />
-                <label>
-                  {common.date}
-                  <input
-                    name="date"
-                    type="date"
-                    defaultValue={editing?.occurred_on ?? today()}
-                    required
-                  />
-                </label>
-                {view === "sales" ? (
-                  <div className="sale-lines full">
-                    <div className="sale-lines-head">
-                      <b>{sales.items}</b>
-                      <span>{sales.itemsHint}</span>
-                    </div>
-                    {saleLines.map((line, index) => (
-                      <div className="sale-line" key={line.id}>
-                        <div className="sale-line-head">
-                          <b>
-                            {sales.item} {index + 1}
-                          </b>
-                          {saleLines.length > 1 && (
-                            <button
-                              type="button"
-                              className="table-delete"
-                              onClick={() => removeSaleLine(line.id)}
-                            >
-                              {sales.remove}
-                            </button>
-                          )}
+              {readOnly && <p className="small-pro">{viewerNote}</p>}
+              {!readOnly && (
+                <form
+                  className="finance-form"
+                  onSubmit={saveEntry}
+                  key={editing?.id ?? "new"}
+                >
+                  <input type="hidden" name="kind" value={selectedKind} />
+                  <label>
+                    {common.date}
+                    <input
+                      name="date"
+                      type="date"
+                      defaultValue={editing?.occurred_on ?? today()}
+                      required
+                    />
+                  </label>
+                  {view === "sales" ? (
+                    <div className="sale-lines full">
+                      <div className="sale-lines-head">
+                        <b>{sales.items}</b>
+                        <span>{sales.itemsHint}</span>
+                      </div>
+                      {saleLines.map((line, index) => (
+                        <div className="sale-line" key={line.id}>
+                          <div className="sale-line-head">
+                            <b>
+                              {sales.item} {index + 1}
+                            </b>
+                            {saleLines.length > 1 && (
+                              <button
+                                type="button"
+                                className="table-delete"
+                                onClick={() => removeSaleLine(line.id)}
+                              >
+                                {sales.remove}
+                              </button>
+                            )}
+                          </div>
+                          <CropSelect
+                            label={common.crop}
+                            options={knownCrops}
+                            words={common}
+                            className="full"
+                            required
+                            value={line.crop}
+                            onChange={(crop) =>
+                              changeSaleLine(line.id, { crop })
+                            }
+                          />
+                          <label>
+                            {common.amount}
+                            <input
+                              type="number"
+                              min="0"
+                              required
+                              value={line.amount}
+                              onChange={(event) =>
+                                changeSaleLine(line.id, {
+                                  amount: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            {common.quantity}
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              required
+                              value={line.quantity}
+                              onChange={(event) =>
+                                changeSaleLine(line.id, {
+                                  quantity: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          <label className="full">
+                            {common.unit}
+                            <input
+                              placeholder="kg / pcs"
+                              value={line.unit}
+                              onChange={(event) =>
+                                changeSaleLine(line.id, {
+                                  unit: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
                         </div>
+                      ))}
+                      {!editing && (
+                        <button
+                          type="button"
+                          className="finance-button secondary"
+                          onClick={addSaleLine}
+                        >
+                          {sales.addItem}
+                        </button>
+                      )}
+                      <p className="sale-total">
+                        <span>
+                          {sales.total} ·{" "}
+                          {count(
+                            saleLines.length,
+                            sales.itemWord,
+                            sales.itemsWord,
+                          )}
+                        </span>
+                        <b>{yen(saleLinesTotal)}</b>
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {view === "expense" ? (
+                        <label>
+                          {common.category}
+                          <select
+                            name="crop"
+                            required
+                            defaultValue={editing?.crop ?? ""}
+                          >
+                            <option value="" disabled>
+                              {language === "ja"
+                                ? "カテゴリーを選択"
+                                : language === "bn"
+                                  ? "বিভাগ নির্বাচন করুন"
+                                  : "Select category"}
+                            </option>
+                            {cropOptions(expenseCategories).map((category) => (
+                              <option key={category}>{category}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
                         <CropSelect
+                          name="crop"
                           label={common.crop}
                           options={knownCrops}
                           words={common}
-                          className="full"
-                          required
-                          value={line.crop}
-                          onChange={(crop) => changeSaleLine(line.id, { crop })}
-                        />
-                        <label>
-                          {common.amount}
-                          <input
-                            type="number"
-                            min="0"
-                            required
-                            value={line.amount}
-                            onChange={(event) =>
-                              changeSaleLine(line.id, {
-                                amount: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          {common.quantity}
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            required
-                            value={line.quantity}
-                            onChange={(event) =>
-                              changeSaleLine(line.id, {
-                                quantity: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        <label className="full">
-                          {common.unit}
-                          <input
-                            placeholder="kg / pcs"
-                            value={line.unit}
-                            onChange={(event) =>
-                              changeSaleLine(line.id, {
-                                unit: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                      </div>
-                    ))}
-                    {!editing && (
-                      <button
-                        type="button"
-                        className="finance-button secondary"
-                        onClick={addSaleLine}
-                      >
-                        {sales.addItem}
-                      </button>
-                    )}
-                    <p className="sale-total">
-                      <span>
-                        {sales.total} ·{" "}
-                        {count(
-                          saleLines.length,
-                          sales.itemWord,
-                          sales.itemsWord,
-                        )}
-                      </span>
-                      <b>{yen(saleLinesTotal)}</b>
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    {view === "expense" ? (
-                      <label>
-                        {common.category}
-                        <select
-                          name="crop"
                           required
                           defaultValue={editing?.crop ?? ""}
-                        >
-                          <option value="" disabled>
-                            {language === "ja"
-                              ? "カテゴリーを選択"
-                              : language === "bn"
-                                ? "বিভাগ নির্বাচন করুন"
-                                : "Select category"}
-                          </option>
-                          {cropOptions(expenseCategories).map((category) => (
-                            <option key={category}>{category}</option>
-                          ))}
-                        </select>
+                        />
+                      )}
+                      <label>
+                        {view === "harvest"
+                          ? `${common.amount} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
+                          : common.amount}
+                        <input
+                          name="amount"
+                          type="number"
+                          min="0"
+                          required={view !== "harvest"}
+                          defaultValue={editing?.amount ?? ""}
+                        />
                       </label>
-                    ) : (
-                      <CropSelect
-                        name="crop"
-                        label={common.crop}
-                        options={knownCrops}
-                        words={common}
-                        required
-                        defaultValue={editing?.crop ?? ""}
-                      />
-                    )}
-                    <label>
-                      {view === "harvest"
-                        ? `${common.amount} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
-                        : common.amount}
-                      <input
-                        name="amount"
-                        type="number"
-                        min="0"
-                        required={view !== "harvest"}
-                        defaultValue={editing?.amount ?? ""}
-                      />
-                    </label>
-                    <label>
-                      {view === "expense"
-                        ? `${common.quantity} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
-                        : common.quantity}
-                      <input
-                        name="quantity"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        required={view === "harvest"}
-                        defaultValue={editing?.quantity ?? ""}
-                      />
-                    </label>
-                    <label>
-                      {common.unit}
-                      <input
-                        name="unit"
-                        placeholder="kg / pcs / hours"
-                        defaultValue={editing?.unit ?? ""}
-                      />
-                    </label>
-                  </>
-                )}
-                {view === "expense" && (
-                  <HolderSelect
-                    name="paid_by"
-                    label={common.paidBy}
-                    options={knownHolders}
-                    words={common}
-                    required
-                    placeholder="Rafi"
-                    defaultValue={editing ? payerOf(editing) : ""}
-                  />
-                )}
-                {view === "sales" && (
-                  <>
-                    {/* Full width: buyer names are long and the form column is
-                        narrow, so a half-width dropdown would clip them. */}
+                      <label>
+                        {view === "expense"
+                          ? `${common.quantity} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
+                          : common.quantity}
+                        <input
+                          name="quantity"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          required={view === "harvest"}
+                          defaultValue={editing?.quantity ?? ""}
+                        />
+                      </label>
+                      <label>
+                        {common.unit}
+                        <input
+                          name="unit"
+                          placeholder="kg / pcs / hours"
+                          defaultValue={editing?.unit ?? ""}
+                        />
+                      </label>
+                    </>
+                  )}
+                  {view === "expense" && (
                     <HolderSelect
-                      name="customer"
-                      label={common.customer}
-                      options={knownCustomers}
-                      words={common}
-                      className="full"
-                      placeholder="Community / Restaurant"
-                      defaultValue={editField("Customer") || editField("Buyer")}
-                    />
-                    <label>
-                      Channel
-                      <select
-                        name="channel"
-                        defaultValue={editing ? editField("Channel") : "Direct"}
-                      >
-                        <option value="">—</option>
-                        <option>Community</option>
-                        <option>WhatsApp</option>
-                        <option>Facebook</option>
-                        <option>Direct</option>
-                        <option>Restaurant</option>
-                        <option>Other</option>
-                      </select>
-                    </label>
-                    <label>
-                      Payment
-                      <select
-                        name="payment"
-                        defaultValue={editing ? editField("Payment") : "Paid"}
-                      >
-                        <option value="">—</option>
-                        <option>Paid</option>
-                        <option>Pending</option>
-                      </select>
-                    </label>
-                    <HolderSelect
-                      name="cash_with"
-                      label={
-                        language === "bn"
-                          ? "টাকা কার কাছে"
-                          : language === "ja"
-                            ? "代金の保管者"
-                            : "Cash with"
-                      }
+                      name="paid_by"
+                      label={common.paidBy}
                       options={knownHolders}
                       words={common}
-                      placeholder="Shakhawat"
-                      defaultValue={editField("Cash with")}
+                      required
+                      placeholder="Rafi"
+                      defaultValue={editing ? payerOf(editing) : ""}
                     />
-                  </>
-                )}
-                {view === "harvest" && (
-                  <>
-                    <label>
-                      Sellable quantity
-                      <input
-                        name="sellable"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        defaultValue={editField("Sellable")}
+                  )}
+                  {view === "sales" && (
+                    <>
+                      {/* Full width: buyer names are long and the form column is
+                        narrow, so a half-width dropdown would clip them. */}
+                      <HolderSelect
+                        name="customer"
+                        label={common.customer}
+                        options={knownCustomers}
+                        words={common}
+                        className="full"
+                        placeholder="Community / Restaurant"
+                        defaultValue={
+                          editField("Customer") || editField("Buyer")
+                        }
                       />
-                    </label>
-                    <label>
-                      Waste quantity
-                      <input
-                        name="waste"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        defaultValue={editField("Waste")}
+                      <label>
+                        Channel
+                        <select
+                          name="channel"
+                          defaultValue={
+                            editing ? editField("Channel") : "Direct"
+                          }
+                        >
+                          <option value="">—</option>
+                          <option>Community</option>
+                          <option>WhatsApp</option>
+                          <option>Facebook</option>
+                          <option>Direct</option>
+                          <option>Restaurant</option>
+                          <option>Other</option>
+                        </select>
+                      </label>
+                      <label>
+                        Payment
+                        <select
+                          name="payment"
+                          defaultValue={editing ? editField("Payment") : "Paid"}
+                        >
+                          <option value="">—</option>
+                          <option>Paid</option>
+                          <option>Pending</option>
+                        </select>
+                      </label>
+                      <HolderSelect
+                        name="cash_with"
+                        label={
+                          language === "bn"
+                            ? "টাকা কার কাছে"
+                            : language === "ja"
+                              ? "代金の保管者"
+                              : "Cash with"
+                        }
+                        options={knownHolders}
+                        words={common}
+                        placeholder="Shakhawat"
+                        defaultValue={editField("Cash with")}
                       />
-                    </label>
-                  </>
-                )}
-                <label className="full">
-                  {common.note}
-                  <input
-                    name="note"
-                    placeholder="Customer, supplier, quality, delivery or task"
-                    defaultValue={freeNote(editing?.note)}
-                  />
-                </label>
-                <button className="finance-button full" disabled={busy}>
-                  {editing
-                    ? "Update record"
-                    : view === "sales" && saleLines.length > 1
-                      ? `${common.save} · ${count(saleLines.length, sales.itemWord, sales.itemsWord)} · ${yen(saleLinesTotal)}`
-                      : common.save}
-                </button>
-                {editing && (
-                  <button
-                    type="button"
-                    className="finance-button secondary full"
-                    onClick={() => {
-                      setEditing(null);
-                      resetSaleLines();
-                    }}
-                  >
-                    Cancel edit
+                    </>
+                  )}
+                  {view === "harvest" && (
+                    <>
+                      <label>
+                        Sellable quantity
+                        <input
+                          name="sellable"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          defaultValue={editField("Sellable")}
+                        />
+                      </label>
+                      <label>
+                        Waste quantity
+                        <input
+                          name="waste"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          defaultValue={editField("Waste")}
+                        />
+                      </label>
+                    </>
+                  )}
+                  <label className="full">
+                    {common.note}
+                    <input
+                      name="note"
+                      placeholder="Customer, supplier, quality, delivery or task"
+                      defaultValue={freeNote(editing?.note)}
+                    />
+                  </label>
+                  <button className="finance-button full" disabled={busy}>
+                    {editing
+                      ? "Update record"
+                      : view === "sales" && saleLines.length > 1
+                        ? `${common.save} · ${count(saleLines.length, sales.itemWord, sales.itemsWord)} · ${yen(saleLinesTotal)}`
+                        : common.save}
                   </button>
-                )}
-              </form>
+                  {editing && (
+                    <button
+                      type="button"
+                      className="finance-button secondary full"
+                      onClick={() => {
+                        setEditing(null);
+                        resetSaleLines();
+                      }}
+                    >
+                      Cancel edit
+                    </button>
+                  )}
+                </form>
+              )}
               {view === "sales" && (
                 <>
                   <SectionTitle
@@ -3253,74 +3485,80 @@ export default function Home() {
                           : "A negative balance means the member paid farm costs out of their own pocket — the farm owes them that much."}
                     </p>
                   )}
-                  <SectionTitle
-                    title={handover.title}
-                    detail={handover.detail}
-                  />
-                  <form
-                    className="finance-form"
-                    onSubmit={saveHandover}
-                    key={editingHandover?.id ?? "new-handover"}
-                  >
-                    <label>
-                      {common.date}
-                      <input
-                        name="date"
-                        type="date"
-                        defaultValue={editingHandover?.occurred_on ?? today()}
-                        required
+                  {!readOnly && (
+                    <>
+                      <SectionTitle
+                        title={handover.title}
+                        detail={handover.detail}
                       />
-                    </label>
-                    <label>
-                      {handover.amount}
-                      <input
-                        name="amount"
-                        type="number"
-                        min="1"
-                        required
-                        defaultValue={editingHandover?.amount ?? ""}
-                      />
-                    </label>
-                    <HolderSelect
-                      name="from_holder"
-                      label={handover.from}
-                      options={knownHolders}
-                      words={common}
-                      required
-                      placeholder="Shakhawat"
-                      defaultValue={editingHandover?.from_holder ?? ""}
-                    />
-                    <HolderSelect
-                      name="to_holder"
-                      label={handover.to}
-                      options={knownHolders}
-                      words={common}
-                      required
-                      placeholder="Bank"
-                      defaultValue={editingHandover?.to_holder ?? ""}
-                    />
-                    <label className="full">
-                      {common.note}
-                      <input
-                        name="note"
-                        placeholder="Handed over at the field"
-                        defaultValue={editingHandover?.note ?? ""}
-                      />
-                    </label>
-                    <button className="finance-button full" disabled={busy}>
-                      {editingHandover ? handover.update : handover.save}
-                    </button>
-                    {editingHandover && (
-                      <button
-                        type="button"
-                        className="finance-button secondary full"
-                        onClick={() => setEditingHandover(null)}
+                      <form
+                        className="finance-form"
+                        onSubmit={saveHandover}
+                        key={editingHandover?.id ?? "new-handover"}
                       >
-                        {handover.cancel}
-                      </button>
-                    )}
-                    <p className="small-pro full">{handover.hint}</p>
-                  </form>
+                        <label>
+                          {common.date}
+                          <input
+                            name="date"
+                            type="date"
+                            defaultValue={
+                              editingHandover?.occurred_on ?? today()
+                            }
+                            required
+                          />
+                        </label>
+                        <label>
+                          {handover.amount}
+                          <input
+                            name="amount"
+                            type="number"
+                            min="1"
+                            required
+                            defaultValue={editingHandover?.amount ?? ""}
+                          />
+                        </label>
+                        <HolderSelect
+                          name="from_holder"
+                          label={handover.from}
+                          options={knownHolders}
+                          words={common}
+                          required
+                          placeholder="Shakhawat"
+                          defaultValue={editingHandover?.from_holder ?? ""}
+                        />
+                        <HolderSelect
+                          name="to_holder"
+                          label={handover.to}
+                          options={knownHolders}
+                          words={common}
+                          required
+                          placeholder="Bank"
+                          defaultValue={editingHandover?.to_holder ?? ""}
+                        />
+                        <label className="full">
+                          {common.note}
+                          <input
+                            name="note"
+                            placeholder="Handed over at the field"
+                            defaultValue={editingHandover?.note ?? ""}
+                          />
+                        </label>
+                        <button className="finance-button full" disabled={busy}>
+                          {editingHandover ? handover.update : handover.save}
+                        </button>
+                        {editingHandover && (
+                          <button
+                            type="button"
+                            className="finance-button secondary full"
+                            onClick={() => setEditingHandover(null)}
+                          >
+                            {handover.cancel}
+                          </button>
+                        )}
+                        <p className="small-pro full">{handover.hint}</p>
+                      </form>
+                    </>
+                  )}
                   <SectionTitle
                     title={handover.records}
                     detail={`${handovers.length} ${common.records}`}
@@ -3340,24 +3578,28 @@ export default function Home() {
                           </span>
                           <span className="table-actions">
                             <b>{yen(Number(record.amount ?? 0))}</b>
-                            <button
-                              type="button"
-                              className="table-edit"
-                              disabled={busy}
-                              onClick={() => startHandoverEdit(record)}
-                            >
-                              {editingHandover?.id === record.id
-                                ? "Editing…"
-                                : "Edit"}
-                            </button>
-                            <button
-                              type="button"
-                              className="table-delete"
-                              disabled={busy}
-                              onClick={() => void deleteHandover(record.id)}
-                            >
-                              {common.delete}
-                            </button>
+                            {!readOnly && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="table-edit"
+                                  disabled={busy}
+                                  onClick={() => startHandoverEdit(record)}
+                                >
+                                  {editingHandover?.id === record.id
+                                    ? "Editing…"
+                                    : "Edit"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-delete"
+                                  disabled={busy}
+                                  onClick={() => void deleteHandover(record.id)}
+                                >
+                                  {common.delete}
+                                </button>
+                              </>
+                            )}
                           </span>
                         </p>
                       ))
@@ -3589,8 +3831,8 @@ export default function Home() {
               <EntriesTable
                 entries={displayedEntries}
                 busy={busy}
-                onDelete={deleteEntry}
-                onEdit={startEdit}
+                onDelete={readOnly ? undefined : deleteEntry}
+                onEdit={readOnly ? undefined : startEdit}
                 editingId={editing?.id}
               />
             </article>
@@ -3601,112 +3843,115 @@ export default function Home() {
           <section className="entry-page">
             <article className="finance-card entry-card">
               <SectionTitle title={labor.title} detail={labor.detail} />
-              <form
-                className="finance-form"
-                onSubmit={saveLabor}
-                key={editing?.id ?? "new"}
-              >
-                <label>
-                  {labor.date}
-                  <input
-                    name="date"
-                    type="date"
-                    defaultValue={editing?.occurred_on ?? today()}
-                    required
-                  />
-                </label>
-                <label>
-                  {labor.member}
-                  <input
-                    name="member"
-                    required
-                    list="known-holders"
-                    defaultValue={editField("Member")}
-                    placeholder={
+              {readOnly && <p className="small-pro">{viewerNote}</p>}
+              {!readOnly && (
+                <form
+                  className="finance-form"
+                  onSubmit={saveLabor}
+                  key={editing?.id ?? "new"}
+                >
+                  <label>
+                    {labor.date}
+                    <input
+                      name="date"
+                      type="date"
+                      defaultValue={editing?.occurred_on ?? today()}
+                      required
+                    />
+                  </label>
+                  <label>
+                    {labor.member}
+                    <input
+                      name="member"
+                      required
+                      list="known-holders"
+                      defaultValue={editField("Member")}
+                      placeholder={
+                        language === "ja"
+                          ? "ラフィ / イスティアク / ファルハン"
+                          : "Rafi / Ishtiaq / Farhan"
+                      }
+                    />
+                    <datalist id="known-holders">
+                      {knownHolders.map((holder) => (
+                        <option key={holder} value={holder} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <label>
+                    {labor.hours}
+                    <input
+                      name="hours"
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      required
+                      placeholder="5"
+                      defaultValue={editing?.quantity ?? ""}
+                    />
+                  </label>
+                  <label>
+                    {labor.rate}
+                    <input
+                      name="rate"
+                      type="number"
+                      min="0"
+                      defaultValue={editing ? editedRate : "0"}
+                    />
+                  </label>
+                  <label>
+                    {labor.transport}
+                    <input
+                      name="transport"
+                      type="number"
+                      min="0"
+                      defaultValue={
+                        editing ? transportFromNote(editing.note) : "0"
+                      }
+                    />
+                  </label>
+                  <CropSelect
+                    name="crop"
+                    label={labor.crop}
+                    options={knownCrops}
+                    words={common}
+                    defaultValue={editing?.crop ?? ""}
+                    emptyLabel={
                       language === "ja"
-                        ? "ラフィ / イスティアク / ファルハン"
-                        : "Rafi / Ishtiaq / Farhan"
-                    }
-                  />
-                  <datalist id="known-holders">
-                    {knownHolders.map((holder) => (
-                      <option key={holder} value={holder} />
-                    ))}
-                  </datalist>
-                </label>
-                <label>
-                  {labor.hours}
-                  <input
-                    name="hours"
-                    type="number"
-                    min="0"
-                    step="0.25"
-                    required
-                    placeholder="5"
-                    defaultValue={editing?.quantity ?? ""}
-                  />
-                </label>
-                <label>
-                  {labor.rate}
-                  <input
-                    name="rate"
-                    type="number"
-                    min="0"
-                    defaultValue={editing ? editedRate : "0"}
-                  />
-                </label>
-                <label>
-                  {labor.transport}
-                  <input
-                    name="transport"
-                    type="number"
-                    min="0"
-                    defaultValue={
-                      editing ? transportFromNote(editing.note) : "0"
-                    }
-                  />
-                </label>
-                <CropSelect
-                  name="crop"
-                  label={labor.crop}
-                  options={knownCrops}
-                  words={common}
-                  defaultValue={editing?.crop ?? ""}
-                  emptyLabel={
-                    language === "ja"
-                      ? "一般"
-                      : language === "bn"
-                        ? "সাধারণ"
-                        : "General"
-                  }
-                />
-                <label className="full">
-                  {labor.task}
-                  <input
-                    name="task"
-                    defaultValue={editField("Task")}
-                    placeholder={
-                      language === "ja"
-                        ? "除草 / 植え付け / 収穫 / 配送"
+                        ? "一般"
                         : language === "bn"
-                          ? "আগাছা পরিষ্কার / রোপণ / সংগ্রহ / ডেলিভারি"
-                          : "Weeding / planting / harvesting / delivery"
+                          ? "সাধারণ"
+                          : "General"
                     }
                   />
-                </label>
-                <button className="finance-button full" disabled={busy}>
-                  {editing ? "Update record" : labor.save}
-                </button>
-                {editing && (
-                  <button
-                    type="button"
-                    className="finance-button secondary full"
-                    onClick={() => setEditing(null)}
-                  >
-                    Cancel edit
+                  <label className="full">
+                    {labor.task}
+                    <input
+                      name="task"
+                      defaultValue={editField("Task")}
+                      placeholder={
+                        language === "ja"
+                          ? "除草 / 植え付け / 収穫 / 配送"
+                          : language === "bn"
+                            ? "আগাছা পরিষ্কার / রোপণ / সংগ্রহ / ডেলিভারি"
+                            : "Weeding / planting / harvesting / delivery"
+                      }
+                    />
+                  </label>
+                  <button className="finance-button full" disabled={busy}>
+                    {editing ? "Update record" : labor.save}
                   </button>
-                )}
-              </form>
+                  {editing && (
+                    <button
+                      type="button"
+                      className="finance-button secondary full"
+                      onClick={() => setEditing(null)}
+                    >
+                      Cancel edit
+                    </button>
+                  )}
+                </form>
+              )}
             </article>
             <article className="finance-card">
               <SectionTitle title={labor.records} detail={labor.saved} />
@@ -3741,22 +3986,26 @@ export default function Home() {
                           <td>{yen(Number(entry.amount ?? 0))}</td>
                           <td>{entry.note || "—"}</td>
                           <td>
-                            <div className="table-actions">
-                              <button
-                                className="table-edit"
-                                disabled={busy}
-                                onClick={() => startEdit(entry)}
-                              >
-                                {editing?.id === entry.id ? "Editing…" : "Edit"}
-                              </button>
-                              <button
-                                className="table-delete"
-                                disabled={busy}
-                                onClick={() => void deleteEntry(entry.id)}
-                              >
-                                {labor.remove}
-                              </button>
-                            </div>
+                            {!readOnly && (
+                              <div className="table-actions">
+                                <button
+                                  className="table-edit"
+                                  disabled={busy}
+                                  onClick={() => startEdit(entry)}
+                                >
+                                  {editing?.id === entry.id
+                                    ? "Editing…"
+                                    : "Edit"}
+                                </button>
+                                <button
+                                  className="table-delete"
+                                  disabled={busy}
+                                  onClick={() => void deleteEntry(entry.id)}
+                                >
+                                  {labor.remove}
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -3805,128 +4054,131 @@ export default function Home() {
                     : "Planting and growth tracking"
                 }
               />
-              <form
-                className="finance-form"
-                onSubmit={saveBatch}
-                key={editingBatch?.id ?? "new"}
-              >
-                {editingBatch && (
-                  <p className="small-pro full">
-                    Editing <b>{editingBatch.code}</b>. The batch code and its
-                    planned tasks stay as they are.
-                  </p>
-                )}
-                <CropSelect
-                  name="crop"
-                  label={common.crop}
-                  options={knownCrops}
-                  words={common}
-                  required
-                  defaultValue={editingBatch?.crop ?? ""}
-                />
-                <label>
-                  Variety / 品種
-                  <input
-                    name="variety"
-                    placeholder="Optional variety name"
-                    defaultValue={editingBatch?.variety ?? ""}
-                  />
-                </label>
-                <label>
-                  Field / Bed
-                  <input
-                    name="bed"
+              {readOnly && <p className="small-pro">{viewerNote}</p>}
+              {!readOnly && (
+                <form
+                  className="finance-form"
+                  onSubmit={saveBatch}
+                  key={editingBatch?.id ?? "new"}
+                >
+                  {editingBatch && (
+                    <p className="small-pro full">
+                      Editing <b>{editingBatch.code}</b>. The batch code and its
+                      planned tasks stay as they are.
+                    </p>
+                  )}
+                  <CropSelect
+                    name="crop"
+                    label={common.crop}
+                    options={knownCrops}
+                    words={common}
                     required
-                    placeholder="A1 / North-02"
-                    defaultValue={editingBatch?.bed ?? ""}
+                    defaultValue={editingBatch?.crop ?? ""}
                   />
-                </label>
-                <label>
-                  Planted / Transplanted date
-                  <input
-                    name="planted_on"
-                    type="date"
-                    defaultValue={editingBatch?.planted_on ?? today()}
-                    required
-                  />
-                </label>
-                <label>
-                  Expected harvest date
-                  <input
-                    name="expected_harvest_on"
-                    type="date"
-                    defaultValue={editingBatch?.expected_harvest_on ?? ""}
-                  />
-                </label>
-                <label>
-                  Area (㎡)
-                  <input
-                    name="area"
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    defaultValue={editingBatch?.area ?? ""}
-                  />
-                </label>
-                <label>
-                  Plants / rows
-                  <input
-                    name="plants"
-                    type="number"
-                    min="0"
-                    defaultValue={editingBatch?.plants ?? ""}
-                  />
-                </label>
-                <label>
-                  Responsible member
-                  <input
-                    name="responsible_member"
-                    placeholder="Rafi / Ishtiaq / Farhan"
-                    list="known-holders"
-                    defaultValue={editingBatch?.responsible_member ?? ""}
-                  />
-                  <datalist id="known-holders">
-                    {knownHolders.map((holder) => (
-                      <option key={holder} value={holder} />
-                    ))}
-                  </datalist>
-                </label>
-                <label>
-                  Current stage
-                  <select
-                    name="stage"
-                    defaultValue={editingBatch?.stage ?? "Planted"}
-                  >
-                    {withOption(batchStages, editingBatch?.stage).map(
-                      (stage) => (
-                        <option key={stage}>{stage}</option>
-                      ),
-                    )}
-                  </select>
-                </label>
-                <label className="full">
-                  Note
-                  <input
-                    name="note"
-                    placeholder="Mulch, trellis, seed source, special condition…"
-                    defaultValue={editingBatch?.note ?? ""}
-                  />
-                </label>
-                <button className="finance-button full" disabled={busy}>
-                  {editingBatch
-                    ? "Update batch"
-                    : "Create batch + generate schedule"}
-                </button>
-                {editingBatch && (
-                  <button
-                    type="button"
-                    className="finance-button secondary full"
-                    onClick={() => setEditingBatch(null)}
-                  >
-                    Cancel edit
+                  <label>
+                    Variety / 品種
+                    <input
+                      name="variety"
+                      placeholder="Optional variety name"
+                      defaultValue={editingBatch?.variety ?? ""}
+                    />
+                  </label>
+                  <label>
+                    Field / Bed
+                    <input
+                      name="bed"
+                      required
+                      placeholder="A1 / North-02"
+                      defaultValue={editingBatch?.bed ?? ""}
+                    />
+                  </label>
+                  <label>
+                    Planted / Transplanted date
+                    <input
+                      name="planted_on"
+                      type="date"
+                      defaultValue={editingBatch?.planted_on ?? today()}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Expected harvest date
+                    <input
+                      name="expected_harvest_on"
+                      type="date"
+                      defaultValue={editingBatch?.expected_harvest_on ?? ""}
+                    />
+                  </label>
+                  <label>
+                    Area (㎡)
+                    <input
+                      name="area"
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      defaultValue={editingBatch?.area ?? ""}
+                    />
+                  </label>
+                  <label>
+                    Plants / rows
+                    <input
+                      name="plants"
+                      type="number"
+                      min="0"
+                      defaultValue={editingBatch?.plants ?? ""}
+                    />
+                  </label>
+                  <label>
+                    Responsible member
+                    <input
+                      name="responsible_member"
+                      placeholder="Rafi / Ishtiaq / Farhan"
+                      list="known-holders"
+                      defaultValue={editingBatch?.responsible_member ?? ""}
+                    />
+                    <datalist id="known-holders">
+                      {knownHolders.map((holder) => (
+                        <option key={holder} value={holder} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <label>
+                    Current stage
+                    <select
+                      name="stage"
+                      defaultValue={editingBatch?.stage ?? "Planted"}
+                    >
+                      {withOption(batchStages, editingBatch?.stage).map(
+                        (stage) => (
+                          <option key={stage}>{stage}</option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label className="full">
+                    Note
+                    <input
+                      name="note"
+                      placeholder="Mulch, trellis, seed source, special condition…"
+                      defaultValue={editingBatch?.note ?? ""}
+                    />
+                  </label>
+                  <button className="finance-button full" disabled={busy}>
+                    {editingBatch
+                      ? "Update batch"
+                      : "Create batch + generate schedule"}
                   </button>
-                )}
-              </form>
+                  {editingBatch && (
+                    <button
+                      type="button"
+                      className="finance-button secondary full"
+                      onClick={() => setEditingBatch(null)}
+                    >
+                      Cancel edit
+                    </button>
+                  )}
+                </form>
+              )}
             </article>
             <article className="finance-card planner-guide">
               <SectionTitle
@@ -3963,92 +4215,96 @@ export default function Home() {
                 and profit for each planting.
               </p>
             </article>
-            <article className="finance-card entry-card">
-              <SectionTitle
-                title={editingTask ? "Edit Farm Task" : "Add Custom Farm Task"}
-                detail={editingTask ? "Saved task" : "For exceptional work"}
-              />
-              {batches.length ? (
-                <form
-                  className="finance-form"
-                  onSubmit={saveCropTask}
-                  key={editingTask?.id ?? "new"}
-                >
-                  <label>
-                    Batch
-                    <select
-                      name="batch_id"
-                      required
-                      defaultValue={editingTask?.batch_id ?? ""}
-                    >
-                      <option value="" disabled>
-                        Select batch
-                      </option>
-                      {batches.map((batch) => (
-                        <option key={batch.id} value={batch.id}>
-                          {batch.code} · {batch.crop}
+            {!readOnly && (
+              <article className="finance-card entry-card">
+                <SectionTitle
+                  title={
+                    editingTask ? "Edit Farm Task" : "Add Custom Farm Task"
+                  }
+                  detail={editingTask ? "Saved task" : "For exceptional work"}
+                />
+                {batches.length ? (
+                  <form
+                    className="finance-form"
+                    onSubmit={saveCropTask}
+                    key={editingTask?.id ?? "new"}
+                  >
+                    <label>
+                      Batch
+                      <select
+                        name="batch_id"
+                        required
+                        defaultValue={editingTask?.batch_id ?? ""}
+                      >
+                        <option value="" disabled>
+                          Select batch
                         </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Task type
-                    <select
-                      name="task_type"
-                      defaultValue={editingTask?.task_type ?? "Fertilizer"}
-                    >
-                      {withOption(taskTypes, editingTask?.task_type).map(
-                        (type) => (
-                          <option key={type}>{type}</option>
-                        ),
-                      )}
-                    </select>
-                  </label>
-                  <label>
-                    Due date
-                    <input
-                      name="due_on"
-                      type="date"
-                      defaultValue={editingTask?.due_on ?? today()}
-                      required
-                    />
-                  </label>
-                  <label>
-                    Responsible
-                    <input
-                      name="responsible_member"
-                      placeholder="Hossain"
-                      list="known-holders"
-                      defaultValue={editingTask?.responsible_member ?? ""}
-                    />
-                  </label>
-                  <label className="full">
-                    Instruction
-                    <input
-                      name="instruction"
-                      placeholder="What exactly should be done?"
-                      defaultValue={editingTask?.instruction ?? ""}
-                    />
-                  </label>
-                  <button className="finance-button" disabled={busy}>
-                    {editingTask ? "Update task" : "Add task"}
-                  </button>
-                  {editingTask && (
-                    <button
-                      type="button"
-                      className="finance-button secondary"
-                      onClick={() => setEditingTask(null)}
-                    >
-                      Cancel edit
+                        {batches.map((batch) => (
+                          <option key={batch.id} value={batch.id}>
+                            {batch.code} · {batch.crop}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Task type
+                      <select
+                        name="task_type"
+                        defaultValue={editingTask?.task_type ?? "Fertilizer"}
+                      >
+                        {withOption(taskTypes, editingTask?.task_type).map(
+                          (type) => (
+                            <option key={type}>{type}</option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                    <label>
+                      Due date
+                      <input
+                        name="due_on"
+                        type="date"
+                        defaultValue={editingTask?.due_on ?? today()}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Responsible
+                      <input
+                        name="responsible_member"
+                        placeholder="Hossain"
+                        list="known-holders"
+                        defaultValue={editingTask?.responsible_member ?? ""}
+                      />
+                    </label>
+                    <label className="full">
+                      Instruction
+                      <input
+                        name="instruction"
+                        placeholder="What exactly should be done?"
+                        defaultValue={editingTask?.instruction ?? ""}
+                      />
+                    </label>
+                    <button className="finance-button" disabled={busy}>
+                      {editingTask ? "Update task" : "Add task"}
                     </button>
-                  )}
-                </form>
-              ) : (
-                <p className="small-pro">
-                  Create a crop batch first, then add its farm tasks here.
-                </p>
-              )}
-            </article>
+                    {editingTask && (
+                      <button
+                        type="button"
+                        className="finance-button secondary"
+                        onClick={() => setEditingTask(null)}
+                      >
+                        Cancel edit
+                      </button>
+                    )}
+                  </form>
+                ) : (
+                  <p className="small-pro">
+                    Create a crop batch first, then add its farm tasks here.
+                  </p>
+                )}
+              </article>
+            )}
             <article className="finance-card">
               <SectionTitle
                 title="Planned Farm Tasks"
@@ -4063,7 +4319,7 @@ export default function Home() {
                       <th>Task</th>
                       <th>Instruction</th>
                       <th>Status</th>
-                      <th>Actions</th>
+                      {!readOnly && <th>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -4085,40 +4341,44 @@ export default function Home() {
                                 {task.completed ? "Done" : "Open"}
                               </span>
                             </td>
-                            <td className="table-actions">
-                              <button
-                                type="button"
-                                className="table-edit"
-                                disabled={busy}
-                                onClick={() => startTaskEdit(task)}
-                              >
-                                {editingTask?.id === task.id
-                                  ? "Editing…"
-                                  : "Edit"}
-                              </button>
-                              <button
-                                type="button"
-                                className="table-edit"
-                                disabled={busy}
-                                onClick={() => void completeCropTask(task)}
-                              >
-                                {task.completed ? "Reopen" : "Done"}
-                              </button>
-                              <button
-                                type="button"
-                                className="table-delete"
-                                disabled={busy}
-                                onClick={() => void deleteCropTask(task.id)}
-                              >
-                                Delete
-                              </button>
-                            </td>
+                            {!readOnly && (
+                              <td className="table-actions">
+                                <button
+                                  type="button"
+                                  className="table-edit"
+                                  disabled={busy}
+                                  onClick={() => startTaskEdit(task)}
+                                >
+                                  {editingTask?.id === task.id
+                                    ? "Editing…"
+                                    : "Edit"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-edit"
+                                  disabled={busy}
+                                  onClick={() => void completeCropTask(task)}
+                                >
+                                  {task.completed ? "Reopen" : "Done"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="table-delete"
+                                  disabled={busy}
+                                  onClick={() => void deleteCropTask(task.id)}
+                                >
+                                  Delete
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={6}>No planned tasks yet.</td>
+                        <td colSpan={readOnly ? 5 : 6}>
+                          No planned tasks yet.
+                        </td>
                       </tr>
                     )}
                   </tbody>
@@ -4141,7 +4401,7 @@ export default function Home() {
                       <th>Expected harvest</th>
                       <th>Field · member</th>
                       <th>Tasks open</th>
-                      <th>Actions</th>
+                      {!readOnly && <th>Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -4173,34 +4433,36 @@ export default function Home() {
                                 .join(" · ") || "—"}
                             </td>
                             <td>{openTasks || "—"}</td>
-                            <td>
-                              <div className="table-actions">
-                                <button
-                                  type="button"
-                                  className="table-edit"
-                                  disabled={busy}
-                                  onClick={() => startBatchEdit(batch)}
-                                >
-                                  {editingBatch?.id === batch.id
-                                    ? "Editing…"
-                                    : "Edit"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="table-delete"
-                                  disabled={busy}
-                                  onClick={() => void deleteBatch(batch.id)}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
+                            {!readOnly && (
+                              <td>
+                                <div className="table-actions">
+                                  <button
+                                    type="button"
+                                    className="table-edit"
+                                    disabled={busy}
+                                    onClick={() => startBatchEdit(batch)}
+                                  >
+                                    {editingBatch?.id === batch.id
+                                      ? "Editing…"
+                                      : "Edit"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="table-delete"
+                                    disabled={busy}
+                                    onClick={() => void deleteBatch(batch.id)}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={8}>No crop batches yet.</td>
+                        <td colSpan={readOnly ? 7 : 8}>No crop batches yet.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4253,49 +4515,51 @@ export default function Home() {
                 )}
               </div>
             </article>
-            <article className="finance-card entry-card">
-              <SectionTitle title="Orders" detail="Order → delivery" />
-              <form className="finance-form" onSubmit={saveOrder}>
-                <label>
-                  {common.customer}
-                  <input
-                    name="customer_name"
-                    required
-                    placeholder="Community Buyers"
-                    list="saved-customers"
+            {!readOnly && (
+              <article className="finance-card entry-card">
+                <SectionTitle title="Orders" detail="Order → delivery" />
+                <form className="finance-form" onSubmit={saveOrder}>
+                  <label>
+                    {common.customer}
+                    <input
+                      name="customer_name"
+                      required
+                      placeholder="Community Buyers"
+                      list="saved-customers"
+                    />
+                    <datalist id="saved-customers">
+                      {customerNames.map((customer) => (
+                        <option key={customer} value={customer} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <CropSelect
+                    name="crop"
+                    label={common.crop}
+                    options={knownCrops}
+                    words={common}
+                    emptyLabel={common.selectCrop}
                   />
-                  <datalist id="saved-customers">
-                    {customerNames.map((customer) => (
-                      <option key={customer} value={customer} />
-                    ))}
-                  </datalist>
-                </label>
-                <CropSelect
-                  name="crop"
-                  label={common.crop}
-                  options={knownCrops}
-                  words={common}
-                  emptyLabel={common.selectCrop}
-                />
-                <label>
-                  Quantity
-                  <input name="quantity" type="number" min="0" step="0.01" />
-                </label>
-                <label>
-                  Status
-                  <select name="status" defaultValue="new">
-                    <option value="new">New</option>
-                    <option value="confirmed">Confirmed</option>
-                    <option value="packed">Packed</option>
-                    <option value="delivered">Delivered</option>
-                    <option value="cancelled">Cancelled</option>
-                  </select>
-                </label>
-                <button className="finance-button full" disabled={busy}>
-                  Save order
-                </button>
-              </form>
-            </article>
+                  <label>
+                    Quantity
+                    <input name="quantity" type="number" min="0" step="0.01" />
+                  </label>
+                  <label>
+                    Status
+                    <select name="status" defaultValue="new">
+                      <option value="new">New</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="packed">Packed</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </label>
+                  <button className="finance-button full" disabled={busy}>
+                    Save order
+                  </button>
+                </form>
+              </article>
+            )}
             <article className="finance-card">
               <SectionTitle
                 title={labels[language].orders}
@@ -4348,40 +4612,43 @@ export default function Home() {
                 title={labels[language].stock}
                 detail="Farm supplies and inventory"
               />
-              <form className="finance-form" onSubmit={saveInventory}>
-                <label>
-                  Item name
-                  <input name="name" required placeholder="NPK 16-16-16" />
-                </label>
-                <label>
-                  Category
-                  <input
-                    name="category"
-                    placeholder="Fertilizer, seed, packaging…"
-                  />
-                </label>
-                <label>
-                  Quantity
-                  <input
-                    name="quantity"
-                    required
-                    type="number"
-                    min="0"
-                    step="0.01"
-                  />
-                </label>
-                <label>
-                  Unit
-                  <input
-                    name="unit"
-                    defaultValue="pcs"
-                    placeholder="kg / L / pcs"
-                  />
-                </label>
-                <button className="finance-button full" disabled={busy}>
-                  Save stock item
-                </button>
-              </form>
+              {readOnly && <p className="small-pro">{viewerNote}</p>}
+              {!readOnly && (
+                <form className="finance-form" onSubmit={saveInventory}>
+                  <label>
+                    Item name
+                    <input name="name" required placeholder="NPK 16-16-16" />
+                  </label>
+                  <label>
+                    Category
+                    <input
+                      name="category"
+                      placeholder="Fertilizer, seed, packaging…"
+                    />
+                  </label>
+                  <label>
+                    Quantity
+                    <input
+                      name="quantity"
+                      required
+                      type="number"
+                      min="0"
+                      step="0.01"
+                    />
+                  </label>
+                  <label>
+                    Unit
+                    <input
+                      name="unit"
+                      defaultValue="pcs"
+                      placeholder="kg / L / pcs"
+                    />
+                  </label>
+                  <button className="finance-button full" disabled={busy}>
+                    Save stock item
+                  </button>
+                </form>
+              )}
             </article>
             <article className="finance-card">
               <SectionTitle
@@ -4429,45 +4696,50 @@ export default function Home() {
                 title={labels[language].investment}
                 detail="Who paid how much"
               />
-              <form className="finance-form" onSubmit={saveInvestment}>
-                <label>
-                  Date
-                  <input
-                    name="date"
-                    type="date"
-                    defaultValue={today()}
-                    required
-                  />
-                </label>
-                <label>
-                  Member
-                  <input
-                    name="member"
-                    required
-                    placeholder="Hossain / Rafi / Ishtiaq"
-                  />
-                </label>
-                <label>
-                  Amount (¥)
-                  <input name="amount" type="number" min="0" required />
-                </label>
-                <label>
-                  Type
-                  <select name="type" defaultValue="Capital">
-                    <option>Capital</option>
-                    <option>Loan</option>
-                    <option>Donation</option>
-                  </select>
-                </label>
-                <label className="full">
-                  Note
-                  <input
-                    name="note"
-                    placeholder="Initial capital, purchase support…"
-                  />
-                </label>
-                <button className="finance-button full">Save investment</button>
-              </form>
+              {readOnly && <p className="small-pro">{viewerNote}</p>}
+              {!readOnly && (
+                <form className="finance-form" onSubmit={saveInvestment}>
+                  <label>
+                    Date
+                    <input
+                      name="date"
+                      type="date"
+                      defaultValue={today()}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Member
+                    <input
+                      name="member"
+                      required
+                      placeholder="Hossain / Rafi / Ishtiaq"
+                    />
+                  </label>
+                  <label>
+                    Amount (¥)
+                    <input name="amount" type="number" min="0" required />
+                  </label>
+                  <label>
+                    Type
+                    <select name="type" defaultValue="Capital">
+                      <option>Capital</option>
+                      <option>Loan</option>
+                      <option>Donation</option>
+                    </select>
+                  </label>
+                  <label className="full">
+                    Note
+                    <input
+                      name="note"
+                      placeholder="Initial capital, purchase support…"
+                    />
+                  </label>
+                  <button className="finance-button full">
+                    Save investment
+                  </button>
+                </form>
+              )}
               <div className="finance-table-wrap investment-table">
                 <table className="finance-table">
                   <thead>
@@ -4494,12 +4766,14 @@ export default function Home() {
                           </td>
                           <td>{item.note || "—"}</td>
                           <td>
-                            <button
-                              className="table-delete"
-                              onClick={() => removeInvestment(item.id)}
-                            >
-                              Delete
-                            </button>
+                            {!readOnly && (
+                              <button
+                                className="table-delete"
+                                onClick={() => removeInvestment(item.id)}
+                              >
+                                Delete
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -5010,6 +5284,7 @@ export default function Home() {
                       <option value="accountant">Accountant</option>
                       <option value="field_member">Field Member</option>
                       <option value="sales">Sales</option>
+                      <option value="viewer">Viewer — view only</option>
                     </select>
                   </label>
                   <button className="finance-button" disabled={busy}>
@@ -5025,6 +5300,68 @@ export default function Home() {
                 If the email has not registered yet, a pending invitation is
                 saved. It will link automatically after they create an account
                 with the same email address.
+              </p>
+              <p className="small-pro">
+                A <b>Viewer</b> sees every page, report and CSV export of this
+                farm but cannot add, edit or delete anything. Pick that role for
+                someone who only needs to follow the numbers.
+              </p>
+            </article>
+            <article className="finance-card settings-page">
+              <SectionTitle
+                title={
+                  language === "ja"
+                    ? "パスワードの変更"
+                    : language === "bn"
+                      ? "পাসওয়ার্ড পরিবর্তন"
+                      : "Change password"
+                }
+                detail={email ?? ""}
+              />
+              <form
+                className="finance-form member-form"
+                onSubmit={changePassword}
+              >
+                <label className="full">
+                  Current password
+                  <input name="current" type="password" required />
+                </label>
+                <label>
+                  New password
+                  <input
+                    name="password"
+                    type="password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <label>
+                  Repeat new password
+                  <input
+                    name="confirm"
+                    type="password"
+                    minLength={8}
+                    required
+                  />
+                </label>
+                <button className="finance-button" disabled={busy}>
+                  Save new password
+                </button>
+              </form>
+              <div className="settings-actions">
+                <button
+                  type="button"
+                  className="finance-button secondary"
+                  disabled={busy}
+                  onClick={() => void sendOwnResetLink()}
+                >
+                  Email me a reset link instead
+                </button>
+              </div>
+              <p className="small-pro">
+                Forgot the current password? Send yourself a reset link, or sign
+                out and use <b>Forgot password</b> on the sign-in screen. Reset
+                links open only in the browser that asked for them.
               </p>
             </article>
             <article className="finance-card settings-page">
@@ -5046,13 +5383,15 @@ export default function Home() {
                 <button className="finance-button" onClick={exportCsv}>
                   Export all data as CSV
                 </button>
-                <button
-                  className="finance-button secondary"
-                  disabled={busy}
-                  onClick={() => void import2026Workbook()}
-                >
-                  Import 2026 Expense & Sales workbook
-                </button>
+                {!readOnly && (
+                  <button
+                    className="finance-button secondary"
+                    disabled={busy}
+                    onClick={() => void import2026Workbook()}
+                  >
+                    Import 2026 Expense & Sales workbook
+                  </button>
+                )}
               </div>
               <p className="import-note">
                 Imports 17 expenses and 9 sales from{" "}
@@ -5268,10 +5607,12 @@ function EntriesTable({
 }: {
   entries: Entry[];
   busy: boolean;
-  onDelete: (id: string) => Promise<void>;
+  // Left out for a view-only member, which also drops the actions column.
+  onDelete?: (id: string) => Promise<void>;
   onEdit?: (entry: Entry) => void;
   editingId?: string;
 }) {
+  const actions = Boolean(onDelete || onEdit);
   return (
     <div className="finance-table-wrap">
       <table className="finance-table">
@@ -5283,7 +5624,7 @@ function EntriesTable({
             <th>Amount</th>
             <th>Quantity</th>
             <th>Note</th>
-            <th></th>
+            {actions && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -5306,31 +5647,35 @@ function EntriesTable({
                     : "—"}
                 </td>
                 <td>{entry.note || "—"}</td>
-                <td>
-                  <div className="table-actions">
-                    {onEdit && (
-                      <button
-                        className="table-edit"
-                        disabled={busy}
-                        onClick={() => onEdit(entry)}
-                      >
-                        {editingId === entry.id ? "Editing…" : "Edit"}
-                      </button>
-                    )}
-                    <button
-                      className="table-delete"
-                      disabled={busy}
-                      onClick={() => void onDelete(entry.id)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
+                {actions && (
+                  <td>
+                    <div className="table-actions">
+                      {onEdit && (
+                        <button
+                          className="table-edit"
+                          disabled={busy}
+                          onClick={() => onEdit(entry)}
+                        >
+                          {editingId === entry.id ? "Editing…" : "Edit"}
+                        </button>
+                      )}
+                      {onDelete && (
+                        <button
+                          className="table-delete"
+                          disabled={busy}
+                          onClick={() => void onDelete(entry.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                )}
               </tr>
             ))
           ) : (
             <tr>
-              <td colSpan={7}>No records yet.</td>
+              <td colSpan={actions ? 7 : 6}>No records yet.</td>
             </tr>
           )}
         </tbody>

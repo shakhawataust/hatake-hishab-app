@@ -7,10 +7,27 @@ Multi-user farm management foundation built with Next.js and Supabase.
 1. Create a Supabase project.
 2. Run `supabase/schema.sql` in its SQL Editor, then the add-on scripts in this
    order: `member-management.sql`, `crop-planner.sql`,
-   `pending-member-invites.sql`, `cash-handovers.sql`.
+   `pending-member-invites.sql`, `cash-handovers.sql`, `view-only-role.sql`.
 3. The SQL creates the private `receipts` Storage bucket and its access policies.
 4. Copy `.env.example` to `.env.local`, then add the project URL and publishable key.
-5. Run `npm run dev` and open `http://localhost:3000`.
+5. In **Authentication → URL Configuration**, add `http://localhost:3000/**` and
+   your deployed origin to the redirect allow-list. Password-reset emails link
+   back to `/?type=recovery`, and Supabase refuses redirects it does not know.
+6. Run `npm run dev` and open `http://localhost:3000`.
+
+## Roles
+
+`admin` adds and removes members. `accountant`, `field_member` and `sales` all
+read and write farm records. `viewer` reads everything — every page, report and
+CSV export — and writes nothing; `supabase/view-only-role.sql` enforces that in
+the database, so a viewer account cannot write even outside this app.
+
+## Passwords
+
+**Forgot password** on the sign-in screen mails a reset link. The link must be
+opened in the same browser that requested it, because the app uses Supabase's
+PKCE flow and the verifier stays in that browser. Members already signed in can
+change their password from **Settings**, which asks for the current one first.
 
 ## Deployment
 

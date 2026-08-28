@@ -133,6 +133,19 @@ main {
 .primary:disabled {
   opacity: 0.65;
 }
+/* Plain text button under the auth form: "Forgot your password?" and the way
+   back out of the password-recovery panel. */
+.auth-link {
+  border: 0;
+  background: none;
+  padding: 2px;
+  justify-self: start;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--green);
+  text-decoration: underline;
+  cursor: pointer;
+}
 .notice,
 .setup {
   font-size: 13px;
@@ -1027,6 +1040,21 @@ footer {
 .pro-userbox span {
   color: #b7d0be;
   text-transform: capitalize;
+}
+/* Read-only members get a badge next to their role so the missing forms are
+   explained at a glance. */
+.viewer-flag {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  font-style: normal;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 .crop-row span:first-child {
   display: grid;
