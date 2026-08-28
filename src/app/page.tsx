@@ -1189,11 +1189,12 @@ export default function Home() {
     };
   }, []);
 
-  // The reset email sends the member back to this page. `type=recovery` is our
-  // own marker on that redirect URL, so the "set a new password" panel opens
-  // even before Supabase has finished exchanging the code in the address bar.
-  // A dead or already-used link comes back with an error instead, and that is
-  // worth showing rather than silently landing on the sign-in form.
+  // The app itself no longer mails anything, but a recovery link sent by hand
+  // from the Supabase dashboard still lands here. `type=recovery` in the address
+  // opens the "set a new password" panel even before Supabase has finished
+  // exchanging the code. A dead or already-used link comes back with an error
+  // instead, and that is worth showing rather than silently landing on the
+  // sign-in form.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams(
@@ -1248,26 +1249,45 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Where Supabase sends the member back after they click the link in the reset
-  // email. The address has to be on the project's redirect allow-list.
-  const recoveryRedirect = () => `${window.location.origin}/?type=recovery`;
-
   async function authenticate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!supabase) return;
     const form = new FormData(event.currentTarget);
     setBusy(true);
+    // Forgetting a password is settled on the spot: the member types their email
+    // and the password they want, and the database sets it. The farm has no mail
+    // sender, so an emailed link would have reached nobody. The trade-off that
+    // buys is written down in supabase/forgot-password.sql.
     if (mode === "reset") {
-      const address = String(form.get("email"));
-      const sent = await supabase.auth.resetPasswordForEmail(address, {
-        redirectTo: recoveryRedirect(),
+      const address = String(form.get("email")).trim();
+      const next = String(form.get("password"));
+      if (next !== String(form.get("confirm"))) {
+        setBusy(false);
+        setNotice("The two passwords do not match.");
+        return;
+      }
+      const done = await supabase.rpc("reset_forgotten_password", {
+        member_email: address,
+        new_password: next,
+      });
+      if (done.error) {
+        setBusy(false);
+        setNotice(done.error.message);
+        return;
+      }
+      // Straight in with the password they just chose, so there is no second
+      // form to fill in and nothing to carry from one screen to the next.
+      const entry = await supabase.auth.signInWithPassword({
+        email: address,
+        password: next,
       });
       setBusy(false);
-      setNotice(
-        sent.error
-          ? sent.error.message
-          : `Reset link sent to ${address}. Open it in this same browser, then choose a new password.`,
-      );
+      if (entry.error) {
+        setMode("signIn");
+        setNotice("Password set. Sign in with the new one.");
+        return;
+      }
+      setNotice("Password set. You are signed in.");
       return;
     }
     const result =
@@ -1344,20 +1364,6 @@ export default function Home() {
     setBusy(false);
     setNotice(result.error ? result.error.message : "Password changed.");
     if (!result.error) formElement.reset();
-  }
-
-  // For a signed-in member who cannot remember the current password: mail the
-  // reset link to their own address instead of making them sign out first.
-  async function sendOwnResetLink() {
-    if (!supabase || !email) return;
-    setBusy(true);
-    const result = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: recoveryRedirect(),
-    });
-    setBusy(false);
-    setNotice(
-      result.error ? result.error.message : `Reset link sent to ${email}.`,
-    );
   }
 
   async function createFarm(event: FormEvent<HTMLFormElement>) {
@@ -2313,8 +2319,9 @@ export default function Home() {
         <section className="empty">Loading Hatake Hishab…</section>
       </main>
     );
-  // Reached by following the link in the reset email. The link itself is the
-  // proof of identity, so this panel only asks for the new password.
+  // Reached by following a recovery link sent from the Supabase dashboard. The
+  // link itself is the proof of identity, so this panel only asks for the new
+  // password.
   if (recovery && email)
     return (
       <main className="auth-shell">
@@ -2364,7 +2371,7 @@ export default function Home() {
           </h1>
           <p>
             {mode === "reset"
-              ? "Enter the email you signed up with and we will send a reset link."
+              ? "Enter the email you signed up with and the password you want from now on. Nothing is emailed — you are signed straight in."
               : "Secure access for your farm team."}
           </p>
           <div className="tabs">
@@ -2392,10 +2399,14 @@ export default function Home() {
               Email
               <input name="email" type="email" required />
             </label>
-            {mode !== "reset" && (
+            <label>
+              {mode === "reset" ? "New password" : "Password"}
+              <input name="password" type="password" minLength={8} required />
+            </label>
+            {mode === "reset" && (
               <label>
-                Password
-                <input name="password" type="password" minLength={8} required />
+                Repeat new password
+                <input name="confirm" type="password" minLength={8} required />
               </label>
             )}
             <button className="primary" disabled={busy}>
@@ -2405,7 +2416,7 @@ export default function Home() {
                   ? "Sign in"
                   : mode === "signUp"
                     ? "Create account"
-                    : "Send reset link"}
+                    : "Set new password"}
             </button>
             {mode === "signIn" && (
               <button
@@ -2424,9 +2435,9 @@ export default function Home() {
               arrives without a session, so say what to do next. */}
           {recovery && (
             <p className="notice">
-              That reset link could not be opened here. Reset links work only in
-              the browser that asked for them, and they expire — request a new
-              one above.
+              That reset link could not be opened here — such links expire and
+              work only in the browser that asked for them. Use{" "}
+              <b>Forgot password</b> above instead; it needs no link.
             </p>
           )}
           {notice && <p className="notice">{notice}</p>}
@@ -5348,20 +5359,10 @@ export default function Home() {
                   Save new password
                 </button>
               </form>
-              <div className="settings-actions">
-                <button
-                  type="button"
-                  className="finance-button secondary"
-                  disabled={busy}
-                  onClick={() => void sendOwnResetLink()}
-                >
-                  Email me a reset link instead
-                </button>
-              </div>
               <p className="small-pro">
-                Forgot the current password? Send yourself a reset link, or sign
-                out and use <b>Forgot password</b> on the sign-in screen. Reset
-                links open only in the browser that asked for them.
+                Forgot the current password? Sign out and use{" "}
+                <b>Forgot password</b> on the sign-in screen: it asks for your
+                email and the new password, and no email has to arrive.
               </p>
             </article>
             <article className="finance-card settings-page">

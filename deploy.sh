@@ -79,10 +79,12 @@ cat <<'BANNER'
       Turn OFF "Confirm email"   (small trusted team)
       ...or configure SMTP under Project Settings.
 
-      "Forgot password" needs email either way: Supabase's
-      built-in sender is rate limited and, on new projects,
-      only delivers to your own team addresses. Add SMTP
-      before members rely on password resets.
+      "Forgot password" needs no email: it asks for the
+      member's address and their new password and sets it
+      on the spot, because Supabase's built-in sender only
+      reaches your own team addresses. Read the warning at
+      the top of supabase/forgot-password.sql — an email
+      address is all it takes to get into an account.
 
  Then send members the URL. Each signs up first, tells you
  their email, and you add them from the Members screen.
