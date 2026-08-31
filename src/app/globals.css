@@ -1608,3 +1608,51 @@ footer {
     font-size: 11px;
   }
 }
+
+.sales-filter {
+  background: var(--pale);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.filter-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.filter-group label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  gap: 4px;
+}
+
+.filter-group select,
+.filter-group input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  background: white;
+  min-width: 140px;
+}
+
+.filter-group button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: white;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.filter-group button:hover {
+  background: var(--line);
+}

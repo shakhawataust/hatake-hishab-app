@@ -1052,6 +1052,10 @@ export default function Home() {
   const [customerQuery, setCustomerQuery] = useState("");
   const [openCustomer, setOpenCustomer] = useState<string | null>(null);
   const [allCustomers, setAllCustomers] = useState(false);
+  const [filterCrop, setFilterCrop] = useState("");
+  const [filterCustomer, setFilterCustomer] = useState("");
+  const [filterMinAmount, setFilterMinAmount] = useState("");
+  const [filterMaxAmount, setFilterMaxAmount] = useState("");
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -2032,7 +2036,25 @@ export default function Home() {
   );
   const displayedEntries =
     view === "sales"
-      ? entries.filter((entry) => entry.kind === "sale")
+      ? entries
+          .filter((entry) => entry.kind === "sale")
+          .filter((entry) => {
+            if (filterCrop && entry.crop !== filterCrop) return false;
+            const amount = Number(entry.amount ?? 0);
+            if (filterMinAmount && amount < Number(filterMinAmount))
+              return false;
+            if (filterMaxAmount && amount > Number(filterMaxAmount))
+              return false;
+            if (filterCustomer) {
+              const customer =
+                noteValue(entry.note, "Customer") ||
+                noteValue(entry.note, "Buyer") ||
+                unknownHolder;
+              if (!customerKey(customer).includes(customerKey(filterCustomer)))
+                return false;
+            }
+            return true;
+          })
       : view === "harvest"
         ? entries.filter((entry) => entry.kind === "harvest")
         : view === "expense"
@@ -3839,6 +3861,65 @@ export default function Home() {
                 title={`${labels[language][view]} ${language === "ja" ? "詳細" : language === "bn" ? "বিবরণ" : "details"}`}
                 detail={common.records}
               />
+              <div className="sales-filter">
+                <div className="filter-group">
+                  <label>
+                    {common.crop}
+                    <select
+                      value={filterCrop}
+                      onChange={(e) => setFilterCrop(e.target.value)}
+                    >
+                      <option value="">— All —</option>
+                      {knownCrops.map((crop) => (
+                        <option key={crop} value={crop}>
+                          {crop}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    {common.customer}
+                    <input
+                      type="text"
+                      value={filterCustomer}
+                      onChange={(e) => setFilterCustomer(e.target.value)}
+                      placeholder="Search customer..."
+                    />
+                  </label>
+                  <label>
+                    {common.amount} (Min)
+                    <input
+                      type="number"
+                      value={filterMinAmount}
+                      onChange={(e) => setFilterMinAmount(e.target.value)}
+                      placeholder="0"
+                      min="0"
+                    />
+                  </label>
+                  <label>
+                    {common.amount} (Max)
+                    <input
+                      type="number"
+                      value={filterMaxAmount}
+                      onChange={(e) => setFilterMaxAmount(e.target.value)}
+                      placeholder="—"
+                      min="0"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setFilterCrop("");
+                      setFilterCustomer("");
+                      setFilterMinAmount("");
+                      setFilterMaxAmount("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
               <EntriesTable
                 entries={displayedEntries}
                 busy={busy}
