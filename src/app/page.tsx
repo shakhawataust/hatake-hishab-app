@@ -1832,15 +1832,28 @@ export default function Home() {
     pdf.text(`$${bill.total_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
     yPos += 7;
 
-    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-    pdf.text("PAID:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-    pdf.text(`$${bill.paid_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
-    yPos += 7;
+    const isPaid = bill.paid_amount >= bill.total_amount;
+    const dueAmount = bill.total_amount - bill.paid_amount;
 
-    pdf.setFillColor(220, 240, 250);
-    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-    pdf.text("DUE:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-    pdf.text(`$${(bill.total_amount - bill.paid_amount).toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+    if (isPaid) {
+      // If fully paid, show green background
+      pdf.setFillColor(200, 230, 201);
+      pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+      pdf.text("STATUS:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
+      pdf.text("FULLY PAID", margin + col1Width + col2Width + 2, yPos);
+    } else {
+      // If partial payment, show paid and due
+      pdf.setFillColor(255, 243, 224);
+      pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+      pdf.text("PAID:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
+      pdf.text(`$${bill.paid_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+      yPos += 7;
+
+      pdf.setFillColor(220, 240, 250);
+      pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+      pdf.text("DUE:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
+      pdf.text(`$${dueAmount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+    }
 
     // Footer
     yPos = pageHeight - 20;
