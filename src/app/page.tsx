@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -1757,123 +1758,131 @@ export default function Home() {
     }
   }
 
-  function downloadBillPDF(bill: Bill, billItems: BillItem[]) {
-    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-    let yPos = 20;
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 15;
-    const contentWidth = pageWidth - 2 * margin;
-
-    // Use Courier font which has better Unicode support
-    pdf.setFont("courier");
-
-    // Header
-    pdf.setFontSize(20);
-    pdf.setFont("courier", "bold");
-    pdf.text("BILL / INVOICE", pageWidth / 2, yPos, { align: "center" });
-    yPos += 10;
-
-    pdf.setFontSize(11);
-    pdf.setFont("courier", "normal");
-    pdf.text("Chiba Hatake", pageWidth / 2, yPos, { align: "center" });
-    yPos += 15;
-
-    // Bill Info
-    pdf.setFontSize(10);
-    pdf.text(`Bill #: ${bill.bill_number}`, margin, yPos);
-    pdf.text(`Date: ${bill.bill_date}`, pageWidth / 2, yPos);
-    yPos += 7;
-    pdf.text(`Customer: ${bill.customer_name}`, margin, yPos);
-    pdf.text(`Status: ${bill.status.toUpperCase()}`, pageWidth / 2, yPos);
-    yPos += 12;
-
-    // Line separator
-    pdf.setDrawColor(0);
-    pdf.line(margin, yPos, pageWidth - margin, yPos);
-    yPos += 8;
-
-    // Table Headers
-    pdf.setFont("courier", "bold");
-    pdf.setFillColor(240, 240, 240);
-    const col1Width = contentWidth * 0.6;
-    const col2Width = contentWidth * 0.2;
-    const col3Width = contentWidth * 0.2;
-
-    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-    pdf.text("Item", margin + 2, yPos);
-    pdf.text("Qty", margin + col1Width + 2, yPos);
-    pdf.text("Amount", margin + col1Width + col2Width + 2, yPos);
-    yPos += 8;
-
-    // Table Rows
-    pdf.setFont("courier", "normal");
-    pdf.setFontSize(9);
-    billItems.forEach((item) => {
-      if (yPos > pageHeight - 30) {
-        pdf.addPage();
-        yPos = margin;
-      }
-
-      // Extract English part from crop name (remove Bangla/Unicode)
-      let desc = String(item.description || "");
-      // If there's text in parentheses, use only that (English part)
-      const match = desc.match(/\(([^)]+)\)/);
-      if (match) {
-        desc = match[1];
-      } else {
-        // Otherwise keep only ASCII characters
-        desc = desc.replace(/[^\x00-\x7F]/g, "").trim();
-      }
-      desc = desc.substring(0, 30);
-
-      pdf.text(desc, margin + 2, yPos, { maxWidth: col1Width - 4 });
-      pdf.text(`${item.quantity} ${item.unit}`, margin + col1Width + 2, yPos);
-      pdf.text(`$${item.amount?.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
-      yPos += 7;
-    });
-
-    yPos += 5;
-    pdf.setFontSize(10);
-    pdf.setFont("courier", "bold");
-    pdf.setFillColor(249, 249, 249);
-    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-    pdf.text("TOTAL:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-    pdf.text(`$${bill.total_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
-    yPos += 7;
+  async function downloadBillPDF(bill: Bill, billItems: BillItem[]) {
+    // Create an invisible container for rendering
+    const container = document.createElement("div");
+    container.style.position = "absolute";
+    container.style.left = "-9999px";
+    container.style.width = "210mm";
+    container.style.padding = "15mm";
+    container.style.background = "white";
+    container.style.fontFamily = "'Noto Sans Bengali', Arial, sans-serif";
+    container.style.fontSize = "12px";
+    container.style.lineHeight = "1.5";
 
     const dueAmount = bill.total_amount - bill.paid_amount;
+    const isPaid = bill.status === "paid";
 
-    if (bill.status === "paid") {
-      // If status is paid, show green background
-      pdf.setFillColor(200, 230, 201);
-      pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-      pdf.text("STATUS:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-      pdf.text("FULLY PAID", margin + col1Width + col2Width + 2, yPos);
-    } else {
-      // If not paid, show paid and due
-      pdf.setFillColor(255, 243, 224);
-      pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-      pdf.text("PAID:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-      pdf.text(`$${bill.paid_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
-      yPos += 7;
+    container.innerHTML = `
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;700&display=swap');
+        body { font-family: 'Noto Sans Bengali', Arial, sans-serif; }
+        * { font-family: 'Noto Sans Bengali', Arial, sans-serif; }
+      </style>
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="margin: 0; font-size: 24px; font-weight: bold;">BILL / INVOICE</h1>
+        <p style="margin: 10px 0; font-size: 14px;">Chiba Hatake</p>
+      </div>
 
-      pdf.setFillColor(220, 240, 250);
-      pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
-      pdf.text("DUE:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-      pdf.text(`$${dueAmount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; font-size: 12px;">
+        <div>
+          <p><strong>Bill #:</strong> ${bill.bill_number}</p>
+          <p><strong>Customer:</strong> ${bill.customer_name}</p>
+        </div>
+        <div>
+          <p><strong>Date:</strong> ${bill.bill_date}</p>
+          <p><strong>Status:</strong> ${bill.status.toUpperCase()}</p>
+        </div>
+      </div>
+
+      <hr style="border: none; border-top: 2px solid #000; margin: 20px 0;">
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+        <thead>
+          <tr style="background: #f0f0f0;">
+            <th style="padding: 10px; text-align: left; border-bottom: 2px solid #333; font-weight: bold;">Item</th>
+            <th style="padding: 10px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Qty</th>
+            <th style="padding: 10px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${billItems.map(item => `
+            <tr style="border-bottom: 1px solid #ddd;">
+              <td style="padding: 10px; text-align: left;">${item.description}</td>
+              <td style="padding: 10px; text-align: right;">${item.quantity} ${item.unit}</td>
+              <td style="padding: 10px; text-align: right;">$${item.amount?.toLocaleString()}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <div style="margin-top: 20px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; background: #f9f9f9; padding: 10px; margin-bottom: 10px;">
+          <strong style="text-align: right; margin-right: 20px;">TOTAL:</strong>
+          <div style="text-align: right;">$${bill.total_amount.toLocaleString()}</div>
+        </div>
+
+        ${isPaid ? `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; background: #c8e6c9; padding: 10px;">
+            <strong style="text-align: right; margin-right: 20px;">STATUS:</strong>
+            <div style="text-align: right;">FULLY PAID</div>
+          </div>
+        ` : `
+          <div style="display: grid; grid-template-columns: 1fr 1fr; background: #fff3e0; padding: 10px; margin-bottom: 10px;">
+            <strong style="text-align: right; margin-right: 20px;">PAID:</strong>
+            <div style="text-align: right;">$${bill.paid_amount.toLocaleString()}</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; background: #dceef8; padding: 10px;">
+            <strong style="text-align: right; margin-right: 20px;">DUE:</strong>
+            <div style="text-align: right;">$${dueAmount.toLocaleString()}</div>
+          </div>
+        `}
+      </div>
+
+      <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #666;">
+        <p>Thank you for your business!</p>
+        <p>Generated on ${new Date().toLocaleDateString()}</p>
+      </div>
+    `;
+
+    document.body.appendChild(container);
+
+    try {
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      pdf.save(`Bill-${bill.bill_number}-${bill.customer_name}.pdf`);
+    } finally {
+      document.body.removeChild(container);
     }
-
-    // Footer
-    yPos = pageHeight - 20;
-    pdf.setFont("courier", "normal");
-    pdf.setFontSize(9);
-    pdf.setTextColor(100);
-    pdf.text("Thank you for your business!", pageWidth / 2, yPos, { align: "center" });
-    pdf.text(`Generated on ${new Date().toLocaleDateString()}`, pageWidth / 2, yPos + 5, { align: "center" });
-
-    // Download
-    pdf.save(`Bill-${bill.bill_number}-${bill.customer_name}.pdf`);
   }
 
   async function createManualBill(event: FormEvent<HTMLFormElement>) {
@@ -5984,9 +5993,9 @@ export default function Home() {
 
                 <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       const billItems = (selectedBill as any).__items || [];
-                      downloadBillPDF(selectedBill, billItems);
+                      await downloadBillPDF(selectedBill, billItems);
                     }}
                     style={{ padding: "8px 16px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", flex: 1 }}
                   >
