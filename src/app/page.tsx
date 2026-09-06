@@ -1776,7 +1776,7 @@ export default function Home() {
 
     pdf.setFontSize(11);
     pdf.setFont("courier", "normal");
-    pdf.text(farm?.name || "Community Farm", pageWidth / 2, yPos, { align: "center" });
+    pdf.text("Chiba Hatake", pageWidth / 2, yPos, { align: "center" });
     yPos += 15;
 
     // Bill Info
@@ -1832,17 +1832,16 @@ export default function Home() {
     pdf.text(`$${bill.total_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
     yPos += 7;
 
-    const isPaid = bill.paid_amount >= bill.total_amount;
     const dueAmount = bill.total_amount - bill.paid_amount;
 
-    if (isPaid) {
-      // If fully paid, show green background
+    if (bill.status === "paid") {
+      // If status is paid, show green background
       pdf.setFillColor(200, 230, 201);
       pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
       pdf.text("STATUS:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
       pdf.text("FULLY PAID", margin + col1Width + col2Width + 2, yPos);
     } else {
-      // If partial payment, show paid and due
+      // If not paid, show paid and due
       pdf.setFillColor(255, 243, 224);
       pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
       pdf.text("PAID:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
@@ -5870,13 +5869,33 @@ export default function Home() {
                           {language === "bn" ? "দেখুন" : language === "ja" ? "表示" : "View"}
                         </button>
                         {!readOnly && (
-                          <button
-                            onClick={() => deleteBill(bill.id)}
-                            disabled={busy}
-                            style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
-                          >
-                            {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
-                          </button>
+                          <>
+                            <button
+                              onClick={async () => {
+                                setSelectedBill(bill);
+                                if (supabase) {
+                                  const { data: items } = await supabase
+                                    .from("bill_items")
+                                    .select("*")
+                                    .eq("bill_id", bill.id);
+                                  if (items) {
+                                    (bill as any).__items = items;
+                                    (bill as any).__editing = true;
+                                  }
+                                }
+                              }}
+                              style={{ marginRight: "5px", padding: "5px 10px", background: "#ffc107", color: "black", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                            >
+                              {language === "bn" ? "সম্পাদনা" : language === "ja" ? "編集" : "Edit"}
+                            </button>
+                            <button
+                              onClick={() => deleteBill(bill.id)}
+                              disabled={busy}
+                              style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                            >
+                              {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
+                            </button>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -5899,6 +5918,39 @@ export default function Home() {
                 <p><strong>{language === "bn" ? "মোট:" : language === "ja" ? "合計:" : "Total:"}</strong> ¥{selectedBill.total_amount.toLocaleString()}</p>
                 <p><strong>{language === "bn" ? "প্রদত্ত:" : language === "ja" ? "支払済み:" : "Paid:"}</strong> ¥{selectedBill.paid_amount.toLocaleString()}</p>
                 <p><strong>{language === "bn" ? "বাকি:" : language === "ja" ? "残り:" : "Due:"}</strong> ¥{(selectedBill.total_amount - selectedBill.paid_amount).toLocaleString()}</p>
+
+                {/* Bill Items Table */}
+                {(selectedBill as any).__items && (selectedBill as any).__items.length > 0 && (
+                  <div style={{ marginTop: "20px", overflowX: "auto" }}>
+                    <h4 style={{ marginBottom: "10px" }}>
+                      {language === "bn" ? "পণ্য:" : language === "ja" ? "商品:" : "Items:"}
+                    </h4>
+                    <table style={{ width: "100%", borderCollapse: "collapse", border: "1px solid #ddd" }}>
+                      <thead>
+                        <tr style={{ background: "#e7f3ff", borderBottom: "2px solid #667eea" }}>
+                          <th style={{ padding: "10px", textAlign: "left", borderRight: "1px solid #ddd" }}>
+                            {language === "bn" ? "পণ্য" : language === "ja" ? "商品" : "Item"}
+                          </th>
+                          <th style={{ padding: "10px", textAlign: "right", borderRight: "1px solid #ddd" }}>
+                            {language === "bn" ? "পরিমাণ" : language === "ja" ? "数量" : "Qty"}
+                          </th>
+                          <th style={{ padding: "10px", textAlign: "right" }}>
+                            {language === "bn" ? "মূল্য" : language === "ja" ? "価格" : "Amount"}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedBill as any).__items.map((item: BillItem, idx: number) => (
+                          <tr key={idx} style={{ borderBottom: "1px solid #ddd" }}>
+                            <td style={{ padding: "10px", borderRight: "1px solid #ddd" }}>{item.description}</td>
+                            <td style={{ padding: "10px", textAlign: "right", borderRight: "1px solid #ddd" }}>{item.quantity} {item.unit}</td>
+                            <td style={{ padding: "10px", textAlign: "right" }}>¥{item.amount?.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
                 {/* Status Update */}
                 {!readOnly && (
