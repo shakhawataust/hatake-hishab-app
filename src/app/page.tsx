@@ -1508,7 +1508,7 @@ export default function Home() {
         : editing
           ? "Record updated."
           : records.length > 1
-            ? `${records.length} ${sales.savedCount} ${yen(saleLinesTotal)}`
+            ? `${records.length} ${sales.savedCount} ${yen(view === "sales" ? saleLinesTotal : expenseLinesTotal)}`
             : "Record saved.",
     );
     if (!result.error) {
@@ -2143,12 +2143,20 @@ export default function Home() {
   };
   const startEdit = (entry: Entry) => {
     setEditing(entry);
-    // A saved sale row is one crop, so editing works on a single line.
     if (entry.kind === "sale")
       setSaleLines([
         {
           ...blankSaleLine(entry.unit ?? ""),
           crop: entry.crop ?? "",
+          amount: entry.amount === null ? "" : String(entry.amount),
+          quantity: entry.quantity === null ? "" : String(entry.quantity),
+        },
+      ]);
+    else if (entry.kind === "expense")
+      setExpenseLines([
+        {
+          ...blankExpenseLine(entry.unit ?? ""),
+          category: entry.crop ?? "",
           amount: entry.amount === null ? "" : String(entry.amount),
           quantity: entry.quantity === null ? "" : String(entry.quantity),
         },
