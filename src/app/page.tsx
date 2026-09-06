@@ -1785,93 +1785,91 @@ export default function Home() {
         body { font-family: 'Noto Sans Bengali', Arial, sans-serif; }
         * { font-family: 'Noto Sans Bengali', Arial, sans-serif; }
       </style>
-      <!-- Header with Logo and Title -->
+      <!-- Header with Company Name -->
       <div style="text-align: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 3px solid #2d5016;">
-        <div style="font-size: 28px; margin-bottom: 5px;">🌿 চিবা হাটেকে সবজির দাম তালিকা 🌿</div>
-        <div style="font-size: 14px; color: #666; margin-bottom: 2px;">Chiba Hatake - Invoice</div>
-        <div style="font-size: 11px; color: #999;">আমাদের তাজা সবজির বিল</div>
+        <div style="font-size: 24px; margin-bottom: 8px; font-weight: bold;">🌿 Chiba Hatake — সবজির হিসাব</div>
+        <div style="font-size: 12px; color: #666;">চিবা হাটেকে তাজা সবজির বিল</div>
       </div>
 
-      <!-- Bill Details -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; font-size: 11px; padding-bottom: 15px; border-bottom: 1px solid #ddd;">
+      <!-- Bill Info Row -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 15px; font-size: 10px; padding-bottom: 10px; border-bottom: 1px solid #ddd;">
         <div>
-          <p style="margin: 3px 0;"><strong>বিল নম্বর:</strong> ${bill.bill_number}</p>
-          <p style="margin: 3px 0;"><strong>গ্রাহক:</strong> ${bill.customer_name}</p>
-          <p style="margin: 3px 0;"><strong>Status:</strong> ${bill.status.toUpperCase()}</p>
+          <p style="margin: 2px 0;"><strong>বিল #:</strong> ${bill.bill_number}</p>
+          <p style="margin: 2px 0;"><strong>গ্রাহক:</strong> ${bill.customer_name}</p>
         </div>
         <div style="text-align: right;">
-          <p style="margin: 3px 0;"><strong>তারিখ:</strong> ${bill.bill_date}</p>
-          <p style="margin: 3px 0;"><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+          <p style="margin: 2px 0;"><strong>তারিখ:</strong> ${bill.bill_date}</p>
+          <p style="margin: 2px 0;"><strong>অবস্থা:</strong> ${bill.status.toUpperCase()}</p>
         </div>
       </div>
 
       <!-- Items Table -->
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px;">
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 11px;">
         <thead>
-          <tr style="background: #2d5016; color: white;">
-            <th style="padding: 10px 8px; text-align: left; font-weight: bold; border: 1px solid #2d5016;">সবজি / Item</th>
-            <th style="padding: 10px 8px; text-align: center; font-weight: bold; border: 1px solid #2d5016;">পরিমাণ / Qty</th>
-            <th style="padding: 10px 8px; text-align: right; font-weight: bold; border: 1px solid #2d5016;">দাম / Unit Price</th>
-            <th style="padding: 10px 8px; text-align: right; font-weight: bold; border: 1px solid #2d5016;">মোট / Amount</th>
+          <tr style="background: #f5f5f5; border-top: 2px solid #333; border-bottom: 2px solid #333;">
+            <th style="padding: 10px 8px; text-align: left; font-weight: bold;">সবজি</th>
+            <th style="padding: 10px 8px; text-align: center; font-weight: bold;">পরিমাণ</th>
+            <th style="padding: 10px 8px; text-align: right; font-weight: bold;">প্রতি কেজি/পিস দাম</th>
+            <th style="padding: 10px 8px; text-align: right; font-weight: bold;">মোট</th>
           </tr>
         </thead>
         <tbody>
           ${billItems.map((item, idx) => `
-            <tr style="border: 1px solid #ddd; ${idx % 2 === 0 ? 'background: #f9f9f9;' : ''}">
-              <td style="padding: 10px 8px; text-align: left; border: 1px solid #ddd;">${item.description}</td>
-              <td style="padding: 10px 8px; text-align: center; border: 1px solid #ddd;">${item.quantity} ${item.unit}</td>
-              <td style="padding: 10px 8px; text-align: right; border: 1px solid #ddd;">¥${item.unit_price?.toLocaleString()}</td>
-              <td style="padding: 10px 8px; text-align: right; border: 1px solid #ddd; font-weight: bold;">¥${item.amount?.toLocaleString()}</td>
+            <tr style="border-bottom: 1px solid #ddd; ${idx % 2 === 0 ? 'background: #f9f9f9;' : ''}">
+              <td style="padding: 10px 8px; text-align: left;">${item.description}</td>
+              <td style="padding: 10px 8px; text-align: center;">${item.quantity} ${item.unit}</td>
+              <td style="padding: 10px 8px; text-align: right;">¥${item.unit_price?.toLocaleString()}</td>
+              <td style="padding: 10px 8px; text-align: right; font-weight: bold;">¥${item.amount?.toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
       </table>
 
-      <div style="margin-top: 20px;">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; background: #f9f9f9; padding: 10px; margin-bottom: 10px;">
-          <strong style="text-align: right; margin-right: 20px;">SUBTOTAL:</strong>
-          <div style="text-align: right;">¥${billItems.reduce((sum, item) => sum + (item.amount || 0), 0).toLocaleString()}</div>
-        </div>
-
+      <!-- Summary Section -->
+      <div style="margin-top: 15px; padding-top: 10px; border-top: 2px solid #333;">
         ${(() => {
-          // Calculate if discount was applied by checking if total_amount < subtotal
           const subtotal = billItems.reduce((sum, item) => sum + (item.amount || 0), 0);
           const discount = subtotal - bill.total_amount;
-          return discount > 0 ? `
-            <div style="display: grid; grid-template-columns: 1fr 1fr; background: #ffe0e0; padding: 10px; margin-bottom: 10px;">
-              <strong style="text-align: right; margin-right: 20px;">DISCOUNT:</strong>
-              <div style="text-align: right;">-¥${discount.toLocaleString()}</div>
+          return `
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; font-size: 11px; margin-bottom: 8px;">
+              <div style="text-align: right;"><strong>মোট আইটেম মূল্য:</strong></div>
+              <div style="text-align: right;">¥${subtotal.toLocaleString()}</div>
             </div>
-          ` : '';
+            ${discount > 0 ? `
+              <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; font-size: 11px; margin-bottom: 8px; color: #d9534f;">
+                <div style="text-align: right;"><strong>ছাড়:</strong></div>
+                <div style="text-align: right;">-¥${discount.toLocaleString()}</div>
+              </div>
+            ` : ''}
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; font-size: 13px; padding: 10px 0; border-top: 2px solid #333; border-bottom: 2px solid #333;">
+              <div style="text-align: right; font-weight: bold;">সর্বমোট:</div>
+              <div style="text-align: right; font-weight: bold;">¥${bill.total_amount.toLocaleString()}</div>
+            </div>
+          `;
         })()}
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; background: #f0f0f0; padding: 10px; margin-bottom: 10px; border-top: 2px solid #333;">
-          <strong style="text-align: right; margin-right: 20px; font-size: 12px;">TOTAL:</strong>
-          <div style="text-align: right; font-size: 12px; font-weight: bold;">¥${bill.total_amount.toLocaleString()}</div>
-        </div>
-
         ${isPaid ? `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; background: #c8e6c9; padding: 10px;">
-            <strong style="text-align: right; margin-right: 20px;">STATUS:</strong>
-            <div style="text-align: right;">FULLY PAID</div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; font-size: 12px; padding: 10px 0; background: #c8e6c9; padding-left: 10px; margin-top: 10px;">
+            <strong style="text-align: right;">অবস্থা:</strong>
+            <strong style="text-align: right;">সম্পূর্ণ পরিশোধিত ✓</strong>
           </div>
         ` : `
-          <div style="display: grid; grid-template-columns: 1fr 1fr; background: #fff3e0; padding: 10px; margin-bottom: 10px;">
-            <strong style="text-align: right; margin-right: 20px;">PAID:</strong>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; font-size: 11px; margin-bottom: 5px; padding-top: 10px;">
+            <div style="text-align: right;">প্রদান করা হয়েছে:</div>
             <div style="text-align: right;">¥${bill.paid_amount.toLocaleString()}</div>
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; background: #dceef8; padding: 10px;">
-            <strong style="text-align: right; margin-right: 20px;">DUE:</strong>
-            <div style="text-align: right;">¥${dueAmount.toLocaleString()}</div>
+          <div style="display: grid; grid-template-columns: 1fr auto; gap: 20px; font-size: 11px; color: #d9534f;">
+            <div style="text-align: right;"><strong>পাওনা:</strong></div>
+            <div style="text-align: right;"><strong>¥${dueAmount.toLocaleString()}</strong></div>
           </div>
         `}
       </div>
 
       <!-- Footer -->
-      <div style="margin-top: 30px; padding-top: 15px; border-top: 2px solid #2d5016; text-align: center;">
-        <p style="margin: 5px 0; font-size: 12px; font-weight: bold;">ধন্যবাদ আমাদের সাথে কেনাকাটার জন্য! 🙏</p>
-        <p style="margin: 5px 0; font-size: 10px; color: #666;">Thank you for your business!</p>
-        <p style="margin: 10px 0; font-size: 10px; color: #999;">📅 ${bill.bill_date} | 🌱 চিবা হাটেকে</p>
+      <div style="margin-top: 25px; padding-top: 15px; border-top: 3px solid #2d5016; text-align: center;">
+        <p style="margin: 8px 0; font-size: 13px; font-weight: bold;">🌿 Chiba Hatake-এর মোট বিল = ¥${bill.total_amount.toLocaleString()} 🌿</p>
+        <p style="margin: 8px 0; font-size: 10px; color: #666;">ধন্যবাদ আমাদের সাথে কেনাকাটার জন্য!</p>
+        <p style="margin: 5px 0; font-size: 9px; color: #999;">${bill.bill_date}</p>
       </div>
     `;
 
