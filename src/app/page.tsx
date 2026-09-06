@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
+import jsPDF from "jspdf";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -1114,6 +1115,10 @@ export default function Home() {
   const [manualBillMode, setManualBillMode] = useState(false);
   const [manualBillItems, setManualBillItems] = useState<Array<{id: number; crop: string; quantity: string; unit: string; amount: string}>>([{id: 1, crop: "", quantity: "", unit: "", amount: ""}]);
   const lastManualBillLineId = useRef(1);
+  const [existingCustomers, setExistingCustomers] = useState<string[]>([]);
+  const [allCrops, setAllCrops] = useState<string[]>([]);
+  const [showNewCustomerInput, setShowNewCustomerInput] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -1750,93 +1755,94 @@ export default function Home() {
   }
 
   function downloadBillPDF(bill: Bill, billItems: BillItem[]) {
-    const doc = `
-      <html>
-        <head>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            .header { text-align: center; margin-bottom: 30px; }
-            .header h1 { margin: 0; }
-            .header p { margin: 5px 0; }
-            .bill-info { margin-bottom: 20px; }
-            .bill-info table { width: 100%; }
-            .bill-info td { padding: 5px; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            th { background: #f0f0f0; padding: 10px; text-align: left; border-bottom: 2px solid #333; }
-            td { padding: 10px; border-bottom: 1px solid #ddd; }
-            .total-row { font-weight: bold; background: #f9f9f9; }
-            .footer { margin-top: 30px; text-align: center; font-size: 0.9em; color: #666; }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>📄 BILL / INVOICE</h1>
-            <p>${farm?.name || "Community Farm"}</p>
-          </div>
+    const pdf = new jsPDF();
+    let yPos = 20;
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 15;
+    const contentWidth = pageWidth - 2 * margin;
 
-          <div class="bill-info">
-            <table>
-              <tr>
-                <td><strong>Bill #:</strong> ${bill.bill_number}</td>
-                <td><strong>Date:</strong> ${bill.bill_date}</td>
-              </tr>
-              <tr>
-                <td><strong>Customer:</strong> ${bill.customer_name}</td>
-                <td><strong>Status:</strong> ${bill.status.toUpperCase()}</td>
-              </tr>
-            </table>
-          </div>
+    // Header
+    pdf.setFontSize(20);
+    pdf.text("BILL / INVOICE", pageWidth / 2, yPos, { align: "center" });
+    yPos += 10;
 
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th style="text-align: right;">Quantity</th>
-                <th style="text-align: right;">Unit Price</th>
-                <th style="text-align: right;">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${billItems.map(item => `
-                <tr>
-                  <td>${item.description}</td>
-                  <td style="text-align: right;">${item.quantity} ${item.unit}</td>
-                  <td style="text-align: right;">¥${item.unit_price?.toLocaleString()}</td>
-                  <td style="text-align: right;">¥${item.amount?.toLocaleString()}</td>
-                </tr>
-              `).join("")}
-              <tr class="total-row">
-                <td colspan="3" style="text-align: right;">TOTAL:</td>
-                <td style="text-align: right;">¥${bill.total_amount.toLocaleString()}</td>
-              </tr>
-              <tr class="total-row">
-                <td colspan="3" style="text-align: right;">PAID:</td>
-                <td style="text-align: right;">¥${bill.paid_amount.toLocaleString()}</td>
-              </tr>
-              <tr class="total-row">
-                <td colspan="3" style="text-align: right;">DUE:</td>
-                <td style="text-align: right;">¥${(bill.total_amount - bill.paid_amount).toLocaleString()}</td>
-              </tr>
-            </tbody>
-          </table>
+    pdf.setFontSize(11);
+    pdf.text(farm?.name || "Community Farm", pageWidth / 2, yPos, { align: "center" });
+    yPos += 15;
 
-          <div class="footer">
-            <p>Generated on ${new Date().toLocaleDateString()}</p>
-            <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px;">Thank you for your business!</p>
-          </div>
-        </body>
-      </html>
-    `;
+    // Bill Info
+    pdf.setFontSize(10);
+    pdf.text(`Bill #: ${bill.bill_number}`, margin, yPos);
+    pdf.text(`Date: ${bill.bill_date}`, pageWidth / 2, yPos);
+    yPos += 7;
+    pdf.text(`Customer: ${bill.customer_name}`, margin, yPos);
+    pdf.text(`Status: ${bill.status.toUpperCase()}`, pageWidth / 2, yPos);
+    yPos += 12;
 
-    const blob = new Blob([doc], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `Bill-${bill.bill_number}-${bill.customer_name}.html`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Line separator
+    pdf.setDrawColor(0);
+    pdf.line(margin, yPos, pageWidth - margin, yPos);
+    yPos += 8;
+
+    // Table Headers
+    pdf.setFont("helvetica", "bold");
+    pdf.setFillColor(240, 240, 240);
+    const col1Width = contentWidth * 0.4;
+    const col2Width = contentWidth * 0.2;
+    const col3Width = contentWidth * 0.2;
+    const col4Width = contentWidth * 0.2;
+
+    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+    pdf.text("Item", margin + 2, yPos);
+    pdf.text("Qty", margin + col1Width + 2, yPos);
+    pdf.text("Unit Price", margin + col1Width + col2Width + 2, yPos);
+    pdf.text("Amount", margin + col1Width + col2Width + col3Width + 2, yPos);
+    yPos += 8;
+
+    // Table Rows
+    pdf.setFont("helvetica", "normal");
+    billItems.forEach((item) => {
+      if (yPos > pageHeight - 30) {
+        pdf.addPage();
+        yPos = margin;
+      }
+
+      pdf.text(item.description, margin + 2, yPos, { maxWidth: col1Width - 4 });
+      pdf.text(`${item.quantity} ${item.unit}`, margin + col1Width + 2, yPos);
+      pdf.text(`¥${item.unit_price?.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+      pdf.text(`¥${item.amount?.toLocaleString()}`, margin + col1Width + col2Width + col3Width + 2, yPos);
+      yPos += 7;
+    });
+
+    yPos += 5;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFillColor(249, 249, 249);
+    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+    pdf.text("TOTAL:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width + col3Width });
+    pdf.text(`¥${bill.total_amount.toLocaleString()}`, margin + col1Width + col2Width + col3Width + 2, yPos);
+    yPos += 7;
+
+    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+    pdf.text("PAID:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width + col3Width });
+    pdf.text(`¥${bill.paid_amount.toLocaleString()}`, margin + col1Width + col2Width + col3Width + 2, yPos);
+    yPos += 7;
+
+    pdf.setFillColor(220, 240, 250);
+    pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
+    pdf.text("DUE:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width + col3Width });
+    pdf.text(`¥${(bill.total_amount - bill.paid_amount).toLocaleString()}`, margin + col1Width + col2Width + col3Width + 2, yPos);
+
+    // Footer
+    yPos = pageHeight - 20;
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.setTextColor(100);
+    pdf.text("Thank you for your business!", pageWidth / 2, yPos, { align: "center" });
+    pdf.text(`Generated on ${new Date().toLocaleDateString()}`, pageWidth / 2, yPos + 5, { align: "center" });
+
+    // Download
+    pdf.save(`Bill-${bill.bill_number}-${bill.customer_name}.pdf`);
   }
 
   async function createManualBill(event: FormEvent<HTMLFormElement>) {
@@ -1845,7 +1851,18 @@ export default function Home() {
 
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    const customerName = String(form.get("customer_name"));
+    let customerName = String(form.get("customer_name"));
+
+    // Use newCustomerName if creating new customer
+    if (showNewCustomerInput && newCustomerName) {
+      customerName = newCustomerName;
+    }
+
+    if (!customerName) {
+      setNotice("Please select or enter a customer name");
+      return;
+    }
+
     const billDate = String(form.get("bill_date"));
 
     // Collect line items
@@ -1931,6 +1948,29 @@ export default function Home() {
     setBillCustomerList(Array.from(customers).sort());
     setSelectedBillCustomer("");
     setBillDatesForCustomer([]);
+  }
+
+  function loadExistingCustomers() {
+    const sales = entries.filter(e => e.kind === "sale");
+    const customers = new Set<string>();
+    sales.forEach(sale => {
+      const customerMatch = sale.note?.match(/Customer: ([^\|]+)/);
+      if (customerMatch) {
+        customers.add(customerMatch[1].trim());
+      }
+    });
+    setExistingCustomers(Array.from(customers).sort());
+  }
+
+  function loadAllCrops() {
+    const sales = entries.filter(e => e.kind === "sale");
+    const crops = new Set<string>();
+    sales.forEach(sale => {
+      if (sale.crop) {
+        crops.add(sale.crop);
+      }
+    });
+    setAllCrops(Array.from(crops).sort());
   }
 
   function loadDatesForCustomer(customerName: string) {
@@ -5531,13 +5571,43 @@ export default function Home() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "15px" }}>
                 <label style={{ display: "block" }}>
                   {language === "bn" ? "গ্রাহক নাম" : language === "ja" ? "顧客名" : "Customer Name"}
-                  <input
-                    name="customer_name"
-                    type="text"
-                    required
-                    placeholder={language === "bn" ? "নতুন বা বিদ্যমান গ্রাহক" : language === "ja" ? "新規または既存の顧客" : "New or existing customer"}
-                    style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
-                  />
+                  <div style={{ display: "flex", gap: "8px", marginTop: "5px" }}>
+                    <select
+                      name="customer_name"
+                      required
+                      onChange={(e) => {
+                        if (e.target.value === "new") {
+                          setShowNewCustomerInput(true);
+                          setNewCustomerName("");
+                        } else {
+                          setShowNewCustomerInput(false);
+                          setNewCustomerName(e.target.value);
+                        }
+                      }}
+                      onClick={() => {
+                        if (existingCustomers.length === 0) {
+                          loadExistingCustomers();
+                        }
+                      }}
+                      style={{ flex: 1, padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                    >
+                      <option value="">{language === "bn" ? "গ্রাহক নির্বাচন" : language === "ja" ? "顧客を選択" : "Select customer"}</option>
+                      {existingCustomers.map((cust) => (
+                        <option key={cust} value={cust}>{cust}</option>
+                      ))}
+                      <option value="new">{language === "bn" ? "➕ নতুন গ্রাহক" : language === "ja" ? "➕ 新規顧客" : "➕ New Customer"}</option>
+                    </select>
+                    {showNewCustomerInput && (
+                      <input
+                        type="text"
+                        placeholder={language === "bn" ? "গ্রাহক নাম" : language === "ja" ? "顧客名" : "Customer name"}
+                        value={newCustomerName}
+                        onChange={(e) => setNewCustomerName(e.target.value)}
+                        style={{ flex: 1, padding: "8px", border: "1px solid #ffc107", borderRadius: "4px", background: "#fffef0" }}
+                        required={showNewCustomerInput}
+                      />
+                    )}
+                  </div>
                 </label>
                 <label style={{ display: "block" }}>
                   {language === "bn" ? "বিল তারিখ" : language === "ja" ? "請求日" : "Bill Date"}
@@ -5570,18 +5640,27 @@ export default function Home() {
                     {manualBillItems.map((item, idx) => (
                       <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
                         <td style={{ padding: "8px" }}>
-                          <input
+                          <select
                             name={`item_crop_${idx}`}
-                            type="text"
-                            placeholder="e.g., Tomato, Rice"
                             value={item.crop}
                             onChange={(e) => {
                               const newItems = [...manualBillItems];
                               newItems[idx].crop = e.target.value;
                               setManualBillItems(newItems);
                             }}
+                            onClick={() => {
+                              if (allCrops.length === 0) {
+                                loadAllCrops();
+                              }
+                            }}
                             style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          />
+                            required
+                          >
+                            <option value="">{language === "bn" ? "ফসল নির্বাচন" : language === "ja" ? "作物を選択" : "Select crop"}</option>
+                            {allCrops.map((crop) => (
+                              <option key={crop} value={crop}>{crop}</option>
+                            ))}
+                          </select>
                         </td>
                         <td style={{ padding: "8px" }}>
                           <input
@@ -5642,15 +5721,37 @@ export default function Home() {
                 </table>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setManualBillItems([...manualBillItems, { id: ++lastManualBillLineId.current, crop: "", quantity: "", unit: "", amount: "" }]);
-                }}
-                style={{ padding: "8px 16px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", marginBottom: "15px" }}
-              >
-                {language === "bn" ? "+ আইটেম যোগ করুন" : language === "ja" ? "+ 行を追加" : "+ Add Line"}
-              </button>
+              <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setManualBillItems([...manualBillItems, { id: ++lastManualBillLineId.current, crop: "", quantity: "", unit: "", amount: "" }]);
+                  }}
+                  style={{ flex: 1, padding: "8px 16px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+                >
+                  {language === "bn" ? "+ আইটেম যোগ করুন" : language === "ja" ? "+ 行を追加" : "+ Add Line"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (allCrops.length === 0) {
+                      loadAllCrops();
+                    }
+                    const newItems = allCrops.map(crop => ({
+                      id: ++lastManualBillLineId.current,
+                      crop,
+                      quantity: "",
+                      unit: "",
+                      amount: ""
+                    }));
+                    setManualBillItems([...manualBillItems, ...newItems]);
+                  }}
+                  style={{ flex: 1, padding: "8px 16px", background: "#17a2b8", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+                  title={language === "bn" ? "সব ফসল একসাথে যোগ করুন" : language === "ja" ? "すべての作物を追加" : "Add all crops at once"}
+                >
+                  {language === "bn" ? "🌾 সব ফসল যোগ করুন" : language === "ja" ? "🌾 全て追加" : "🌾 Add All Crops"}
+                </button>
+              </div>
 
               {manualBillItems.filter(i => i.crop && i.amount).length > 0 && (
                 <div style={{ padding: "10px", background: "#e7f3ff", borderRadius: "4px", marginBottom: "15px", fontSize: "0.9em" }}>
