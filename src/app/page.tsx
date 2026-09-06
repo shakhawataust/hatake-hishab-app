@@ -1810,7 +1810,7 @@ export default function Home() {
             <tr style="border-bottom: 1px solid #ddd;">
               <td style="padding: 10px; text-align: left;">${item.description}</td>
               <td style="padding: 10px; text-align: right;">${item.quantity} ${item.unit}</td>
-              <td style="padding: 10px; text-align: right;">$${item.amount?.toLocaleString()}</td>
+              <td style="padding: 10px; text-align: right;">¥${item.amount?.toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1819,7 +1819,7 @@ export default function Home() {
       <div style="margin-top: 20px;">
         <div style="display: grid; grid-template-columns: 1fr 1fr; background: #f9f9f9; padding: 10px; margin-bottom: 10px;">
           <strong style="text-align: right; margin-right: 20px;">TOTAL:</strong>
-          <div style="text-align: right;">$${bill.total_amount.toLocaleString()}</div>
+          <div style="text-align: right;">¥${bill.total_amount.toLocaleString()}</div>
         </div>
 
         ${isPaid ? `
@@ -1830,11 +1830,11 @@ export default function Home() {
         ` : `
           <div style="display: grid; grid-template-columns: 1fr 1fr; background: #fff3e0; padding: 10px; margin-bottom: 10px;">
             <strong style="text-align: right; margin-right: 20px;">PAID:</strong>
-            <div style="text-align: right;">$${bill.paid_amount.toLocaleString()}</div>
+            <div style="text-align: right;">¥${bill.paid_amount.toLocaleString()}</div>
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; background: #dceef8; padding: 10px;">
             <strong style="text-align: right; margin-right: 20px;">DUE:</strong>
-            <div style="text-align: right;">$${dueAmount.toLocaleString()}</div>
+            <div style="text-align: right;">¥${dueAmount.toLocaleString()}</div>
           </div>
         `}
       </div>
@@ -5462,143 +5462,8 @@ export default function Home() {
           <section className="finance-card">
             <h2>📄 {language === "bn" ? "বিল" : language === "ja" ? "請求書" : "Bills"}</h2>
 
-            {/* Tab Selector */}
-            <div style={{ display: "flex", gap: "10px", marginBottom: "20px", borderBottom: "2px solid #e0e0e0" }}>
-              <button
-                onClick={() => {
-                  setManualBillMode(false);
-                  setSelectedBillCustomer("");
-                  setBillDatesForCustomer([]);
-                  setSelectedBill(null);
-                }}
-                style={{
-                  padding: "10px 20px",
-                  background: !manualBillMode ? "#667eea" : "transparent",
-                  color: !manualBillMode ? "white" : "#666",
-                  border: "none",
-                  borderRadius: "4px 4px 0 0",
-                  cursor: "pointer",
-                  fontWeight: !manualBillMode ? "bold" : "normal"
-                }}
-              >
-                {language === "bn" ? "বিক্রয় থেকে বিল" : language === "ja" ? "販売から" : "Generate from Sales"}
-              </button>
-              <button
-                onClick={() => {
-                  setManualBillMode(true);
-                  setSelectedBillCustomer("");
-                  setBillDatesForCustomer([]);
-                  setSelectedBill(null);
-                }}
-                style={{
-                  padding: "10px 20px",
-                  background: manualBillMode ? "#667eea" : "transparent",
-                  color: manualBillMode ? "white" : "#666",
-                  border: "none",
-                  borderRadius: "4px 4px 0 0",
-                  cursor: "pointer",
-                  fontWeight: manualBillMode ? "bold" : "normal"
-                }}
-              >
-                {language === "bn" ? "ম্যানুয়াল বিল" : language === "ja" ? "手動請求書" : "Manual Bill"}
-              </button>
-            </div>
-
-            {/* OPTION 1: Generate from Sales */}
+            {/* Manual Bill Creation */}
             {!selectedBill && (
-            <>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const form = new FormData(e.currentTarget);
-                generateBillFromSales(
-                  String(form.get("customer")),
-                  String(form.get("startDate")),
-                  String(form.get("endDate"))
-                );
-                (e.currentTarget as HTMLFormElement).reset();
-              }}
-              style={{ marginBottom: "30px", padding: "20px", background: "#f8f9fa", borderRadius: "8px" }}
-            >
-              <h3>{language === "bn" ? "নতুন বিল তৈরি করুন" : language === "ja" ? "新しい請求書を生成" : "Generate New Bill"}</h3>
-              <label style={{ display: "block", marginBottom: "15px" }}>
-                {language === "bn" ? "গ্রাহক নাম" : language === "ja" ? "顧客名" : "Customer Name"}
-                <select
-                  value={selectedBillCustomer}
-                  onChange={(e) => {
-                    setSelectedBillCustomer(e.target.value);
-                    if (e.target.value) {
-                      loadDatesForCustomer(e.target.value);
-                    } else {
-                      setBillDatesForCustomer([]);
-                    }
-                  }}
-                  onClick={() => {
-                    if (billCustomerList.length === 0) {
-                      loadBillCustomers();
-                    }
-                  }}
-                  required
-                  style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
-                >
-                  <option value="">{language === "bn" ? "গ্রাহক নির্বাচন করুন" : language === "ja" ? "顧客を選択" : "Select customer"}</option>
-                  {billCustomerList.map((customer) => (
-                    <option key={customer} value={customer}>
-                      {customer}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {billDatesForCustomer.length > 0 && (
-                <div style={{ marginBottom: "15px", padding: "15px", background: "#e7f3ff", borderRadius: "4px", border: "1px solid #b3d9ff" }}>
-                  <p style={{ margin: "0 0 10px 0" }}>
-                    <strong>{language === "bn" ? "বিক্রয় তারিখ:" : language === "ja" ? "販売日:" : "Sale Dates:"}</strong>
-                  </p>
-                  <p style={{ margin: "0 0 5px 0", fontSize: "0.9em" }}>
-                    {language === "bn" ? "প্রথম:" : language === "ja" ? "開始:" : "From:"} <strong>{billDatesForCustomer[billDatesForCustomer.length - 1]}</strong>
-                    {" "}
-                    {language === "bn" ? "থেকে" : language === "ja" ? "から" : "to"}
-                    {" "}
-                    <strong>{billDatesForCustomer[0]}</strong>
-                  </p>
-                  <p style={{ margin: "0", fontSize: "0.85em", color: "#666" }}>
-                    {language === "bn" ? "মোট বিক্রয়:" : language === "ja" ? "販売回数:" : "Total sales:"} {billDatesForCustomer.length}
-                  </p>
-
-                  {/* Show individual sales */}
-                  <details style={{ marginTop: "10px" }}>
-                    <summary style={{ cursor: "pointer", color: "#667eea", fontWeight: "bold", fontSize: "0.9em" }}>
-                      {language === "bn" ? "বিক্রয় বিবরণ দেখান" : language === "ja" ? "販売の詳細を表示" : "Show individual sales"}
-                    </summary>
-                    <div style={{ marginTop: "10px", maxHeight: "200px", overflowY: "auto", background: "white", padding: "10px", borderRadius: "4px" }}>
-                      {entries
-                        .filter((t: Entry) => t.kind === "sale" && t.note && t.note.includes(selectedBillCustomer))
-                        .filter((t: Entry) => billDatesForCustomer.includes(t.occurred_on))
-                        .map((sale: Entry) => (
-                          <div key={sale.id} style={{ padding: "8px", borderBottom: "1px solid #eee", fontSize: "0.85em" }}>
-                            <strong>{sale.crop}</strong> - ¥{sale.amount?.toLocaleString()} ({sale.quantity} {sale.unit}) - {sale.occurred_on}
-                          </div>
-                        ))}
-                    </div>
-                  </details>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={busy || !selectedBillCustomer || billDatesForCustomer.length === 0}
-                className="finance-button primary"
-                style={{ width: "100%" }}
-              >
-                {language === "bn" ? "বিল তৈরি করুন" : language === "ja" ? "請求書を生成" : "Generate Bill"}
-              </button>
-            </form>
-            </>
-            )}
-
-            {/* OPTION 2: Manual Bill Creation */}
-            {manualBillMode && (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -5888,33 +5753,13 @@ export default function Home() {
                           {language === "bn" ? "দেখুন" : language === "ja" ? "表示" : "View"}
                         </button>
                         {!readOnly && (
-                          <>
-                            <button
-                              onClick={async () => {
-                                setSelectedBill(bill);
-                                if (supabase) {
-                                  const { data: items } = await supabase
-                                    .from("bill_items")
-                                    .select("*")
-                                    .eq("bill_id", bill.id);
-                                  if (items) {
-                                    (bill as any).__items = items;
-                                    (bill as any).__editing = true;
-                                  }
-                                }
-                              }}
-                              style={{ marginRight: "5px", padding: "5px 10px", background: "#ffc107", color: "black", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
-                            >
-                              {language === "bn" ? "সম্পাদনা" : language === "ja" ? "編集" : "Edit"}
-                            </button>
-                            <button
-                              onClick={() => deleteBill(bill.id)}
-                              disabled={busy}
-                              style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
-                            >
-                              {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
-                            </button>
-                          </>
+                          <button
+                            onClick={() => deleteBill(bill.id)}
+                            disabled={busy}
+                            style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                          >
+                            {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
+                          </button>
                         )}
                       </td>
                     </tr>
