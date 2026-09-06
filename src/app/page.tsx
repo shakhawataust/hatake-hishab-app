@@ -5492,10 +5492,10 @@ export default function Home() {
                       {language === "bn" ? "বিক্রয় বিবরণ দেখান" : language === "ja" ? "販売の詳細を表示" : "Show individual sales"}
                     </summary>
                     <div style={{ marginTop: "10px", maxHeight: "200px", overflowY: "auto", background: "white", padding: "10px", borderRadius: "4px" }}>
-                      {transactions
-                        .filter((t) => t.kind === "sale" && t.note && t.note.includes(selectedBillCustomer))
-                        .filter((t) => billDatesForCustomer.includes(t.occurred_on))
-                        .map((sale) => (
+                      {entries
+                        .filter((t: Entry) => t.kind === "sale" && t.note && t.note.includes(selectedBillCustomer))
+                        .filter((t: Entry) => billDatesForCustomer.includes(t.occurred_on))
+                        .map((sale: Entry) => (
                           <div key={sale.id} style={{ padding: "8px", borderBottom: "1px solid #eee", fontSize: "0.85em" }}>
                             <strong>{sale.crop}</strong> - ¥{sale.amount?.toLocaleString()} ({sale.quantity} {sale.unit}) - {sale.occurred_on}
                           </div>
