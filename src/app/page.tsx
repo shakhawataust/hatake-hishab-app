@@ -3411,7 +3411,7 @@ export default function Home() {
                       </label>
                     </>
                   )}
-                  {view === "expense" && !editing && (
+                  {view === "expense" && (
                     <HolderSelect
                       name="paid_by"
                       label={common.paidBy}
@@ -3419,7 +3419,7 @@ export default function Home() {
                       words={common}
                       required
                       placeholder="Rafi"
-                      defaultValue=""
+                      defaultValue={editing ? payerOf(editing) : ""}
                     />
                   )}
                   {view === "sales" && (
