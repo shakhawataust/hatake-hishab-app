@@ -99,6 +99,39 @@ type ExpenseLine = {
 };
 type ReportScope = "month" | "all";
 type Language = "bn" | "en" | "ja";
+// Bill types
+type Bill = {
+  id: string;
+  farm_id: string;
+  bill_number: string;
+  customer_name: string;
+  bill_date: string;
+  due_date: string | null;
+  total_amount: number;
+  paid_amount: number;
+  status: "draft" | "issued" | "sent" | "paid" | "overdue";
+  notes: string | null;
+  created_by: string;
+  created_at: string;
+};
+type BillItem = {
+  id: string;
+  bill_id: string;
+  description: string;
+  quantity: number;
+  unit: string | null;
+  unit_price: number;
+  amount: number;
+};
+type BillPayment = {
+  id: string;
+  bill_id: string;
+  payment_date: string;
+  amount: number;
+  payment_method: string | null;
+  notes: string | null;
+  recorded_by: string;
+};
 // "viewer" is the read-only role: every page stays visible, every form and
 // delete button disappears. supabase/view-only-role.sql enforces the same rule
 // in the database so the restriction is not just a hidden button.
@@ -107,6 +140,7 @@ type View =
   | "dashboard"
   | "expense"
   | "sales"
+  | "bills"
   | "harvest"
   | "batches"
   | "orders"
@@ -120,6 +154,7 @@ const views: { id: View; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "📊" },
   { id: "expense", label: "খরচ যোগ করুন", icon: "💸" },
   { id: "sales", label: "বিক্রি / Sales", icon: "🧺" },
+  { id: "bills", label: "📄 Bills", icon: "📄" },
   { id: "harvest", label: "Harvest", icon: "🥬" },
   { id: "batches", label: "Crop Batches", icon: "🌾" },
   { id: "orders", label: "Customers & Orders", icon: "📦" },
@@ -134,6 +169,7 @@ const labels: Record<Language, Record<View, string>> = {
     dashboard: "ড্যাশবোর্ড",
     expense: "খরচ",
     sales: "বিক্রি",
+    bills: "বিল",
     harvest: "ফসল সংগ্রহ",
     batches: "ফসল ব্যাচ",
     orders: "ক্রেতা ও অর্ডার",
@@ -147,6 +183,7 @@ const labels: Record<Language, Record<View, string>> = {
     dashboard: "Dashboard",
     expense: "Expense",
     sales: "Sales",
+    bills: "Bills",
     harvest: "Harvest",
     batches: "Crop Batches",
     orders: "Customers & Orders",
@@ -160,6 +197,7 @@ const labels: Record<Language, Record<View, string>> = {
     dashboard: "ダッシュボード",
     expense: "経費",
     sales: "販売",
+    bills: "請求書",
     harvest: "収穫",
     batches: "作物ロット",
     orders: "顧客・注文",
@@ -1067,6 +1105,9 @@ export default function Home() {
   const [filterCustomer, setFilterCustomer] = useState("");
   const [filterMinAmount, setFilterMinAmount] = useState("");
   const [filterMaxAmount, setFilterMaxAmount] = useState("");
+  // Bills state
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -1172,6 +1213,7 @@ export default function Home() {
         orderResult,
         taskResult,
         handoverResult,
+        billResult,
       ] = await Promise.all([
         supabase
           .from("transactions")
@@ -1204,8 +1246,14 @@ export default function Home() {
           .select("*")
           .eq("farm_id", selected.id)
           .order("occurred_on", { ascending: false }),
+        supabase
+          .from("bills")
+          .select("*")
+          .eq("farm_id", selected.id)
+          .order("bill_date", { ascending: false }),
       ]);
       setEntries((entryResult.data ?? []) as Entry[]);
+      setBills((billResult.data ?? []) as Bill[]);
       setBatches((batchResult.data ?? []) as CropBatch[]);
       setInventory((inventoryResult.data ?? []) as InventoryItem[]);
       setOrders((orderResult.data ?? []) as FarmOrder[]);
@@ -1570,6 +1618,129 @@ export default function Home() {
     setBusy(false);
     setNotice(result.error ? result.error.message : "Record deleted.");
     if (!result.error) await loadWorkspace();
+  }
+
+  async function generateBillFromSales(
+    customerId: string,
+    startDate: string,
+    endDate: string
+  ) {
+    if (!supabase || !farm) return;
+
+    const { data: sales } = await supabase
+      .from("transactions")
+      .select("*")
+      .eq("farm_id", farm.id)
+      .eq("kind", "sale")
+      .gte("occurred_on", startDate)
+      .lte("occurred_on", endDate)
+      .filter("note", "ilike", `%${customerId}%`);
+
+    if (!sales || !sales.length) {
+      setNotice("No sales found for this customer in the selected date range");
+      return;
+    }
+
+    const totalAmount = sales.reduce((sum, s) => sum + (s.amount || 0), 0);
+    const { data: sessionData } = await supabase.auth.getSession();
+
+    setBusy(true);
+    const billResult = await supabase
+      .from("bills")
+      .insert({
+        farm_id: farm.id,
+        bill_number: `BILL-${Date.now()}`,
+        customer_name: customerId,
+        bill_date: new Date().toISOString().split("T")[0],
+        total_amount: totalAmount,
+        status: "draft",
+        created_by: sessionData.session?.user.id,
+      })
+      .select();
+
+    if (billResult.error || !billResult.data || !billResult.data[0]) {
+      setBusy(false);
+      setNotice(billResult.error?.message || "Failed to create bill");
+      return;
+    }
+
+    const billId = billResult.data[0].id;
+    const items = sales.map((sale) => ({
+      bill_id: billId,
+      description: sale.crop || "Item",
+      quantity: sale.quantity || 1,
+      unit: sale.unit || "pcs",
+      unit_price: sale.amount || 0,
+      amount: sale.amount || 0,
+    }));
+
+    const itemsResult = await supabase.from("bill_items").insert(items);
+
+    setBusy(false);
+    if (itemsResult.error) {
+      setNotice(itemsResult.error.message);
+    } else {
+      setNotice("Bill generated successfully!");
+      await loadWorkspace();
+    }
+  }
+
+  async function recordBillPayment(
+    billId: string,
+    amount: number,
+    paymentMethod: string
+  ) {
+    if (!supabase) return;
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    setBusy(true);
+    const result = await supabase.from("bill_payments").insert({
+      bill_id: billId,
+      amount,
+      payment_method: paymentMethod,
+      recorded_by: sessionData.session?.user.id,
+    });
+
+    setBusy(false);
+    if (result.error) {
+      setNotice(result.error.message);
+    } else {
+      setNotice("Payment recorded successfully!");
+      await loadWorkspace();
+    }
+  }
+
+  async function updateBillStatus(billId: string, status: string) {
+    if (!supabase) return;
+
+    setBusy(true);
+    const result = await supabase
+      .from("bills")
+      .update({ status })
+      .eq("id", billId);
+
+    setBusy(false);
+    if (result.error) {
+      setNotice(result.error.message);
+    } else {
+      setNotice("Bill status updated!");
+      await loadWorkspace();
+    }
+  }
+
+  async function deleteBill(billId: string) {
+    if (!supabase || !window.confirm("Delete this bill?")) return;
+
+    setBusy(true);
+    const result = await supabase.from("bills").delete().eq("id", billId);
+
+    setBusy(false);
+    if (result.error) {
+      setNotice(result.error.message);
+    } else {
+      setNotice("Bill deleted!");
+      await loadWorkspace();
+    }
   }
 
   async function saveHandover(event: FormEvent<HTMLFormElement>) {
@@ -5001,6 +5172,237 @@ export default function Home() {
                 profit.
               </p>
             </article>
+          </section>
+        )}
+
+        {view === "bills" && (
+          <section className="finance-card">
+            <h2>📄 {language === "bn" ? "বিল" : language === "ja" ? "請求書" : "Bills"}</h2>
+
+            {/* Generate Bill Form */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = new FormData(e.currentTarget);
+                generateBillFromSales(
+                  String(form.get("customer")),
+                  String(form.get("startDate")),
+                  String(form.get("endDate"))
+                );
+                (e.currentTarget as HTMLFormElement).reset();
+              }}
+              style={{ marginBottom: "30px", padding: "20px", background: "#f8f9fa", borderRadius: "8px" }}
+            >
+              <h3>{language === "bn" ? "নতুন বিল তৈরি করুন" : language === "ja" ? "新しい請求書を生成" : "Generate New Bill"}</h3>
+              <label style={{ display: "block", marginBottom: "15px" }}>
+                {language === "bn" ? "গ্রাহক নাম" : language === "ja" ? "顧客名" : "Customer Name"}
+                <input
+                  name="customer"
+                  type="text"
+                  required
+                  placeholder={language === "bn" ? "গ্রাহক নাম লিখুন" : language === "ja" ? "顧客名を入力" : "Enter customer name"}
+                  style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                />
+              </label>
+
+              <label style={{ display: "block", marginBottom: "15px" }}>
+                {language === "bn" ? "শুরু তারিখ" : language === "ja" ? "開始日" : "Start Date"}
+                <input
+                  name="startDate"
+                  type="date"
+                  required
+                  style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                />
+              </label>
+
+              <label style={{ display: "block", marginBottom: "15px" }}>
+                {language === "bn" ? "শেষ তারিখ" : language === "ja" ? "終了日" : "End Date"}
+                <input
+                  name="endDate"
+                  type="date"
+                  required
+                  style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                />
+              </label>
+
+              <button type="submit" disabled={busy} className="finance-button primary" style={{ width: "100%" }}>
+                {language === "bn" ? "বিল তৈরি করুন" : language === "ja" ? "請求書を生成" : "Generate Bill"}
+              </button>
+            </form>
+
+            {/* Bills List */}
+            <div style={{ overflowX: "auto", marginBottom: "20px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "#667eea", color: "white" }}>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "বিল নম্বর" : language === "ja" ? "請求書番号" : "Bill #"}
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "গ্রাহক" : language === "ja" ? "顧客" : "Customer"}
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "তারিখ" : language === "ja" ? "日付" : "Date"}
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "মোট" : language === "ja" ? "合計" : "Total"}
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "প্রদত্ত" : language === "ja" ? "支払済み" : "Paid"}
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "অবস্থা" : language === "ja" ? "ステータス" : "Status"}
+                    </th>
+                    <th style={{ padding: "12px", textAlign: "left", borderBottom: "2px solid #ddd" }}>
+                      {language === "bn" ? "পদক্ষেপ" : language === "ja" ? "アクション" : "Actions"}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bills.map((bill) => (
+                    <tr key={bill.id} style={{ borderBottom: "1px solid #eee" }}>
+                      <td style={{ padding: "12px" }}>{bill.bill_number}</td>
+                      <td style={{ padding: "12px" }}>{bill.customer_name}</td>
+                      <td style={{ padding: "12px" }}>{bill.bill_date}</td>
+                      <td style={{ padding: "12px" }}>¥{bill.total_amount.toLocaleString()}</td>
+                      <td style={{ padding: "12px" }}>¥{bill.paid_amount.toLocaleString()}</td>
+                      <td style={{ padding: "12px" }}>
+                        <span
+                          style={{
+                            padding: "4px 8px",
+                            borderRadius: "4px",
+                            background:
+                              bill.status === "paid"
+                                ? "#d4edda"
+                                : bill.status === "overdue"
+                                  ? "#f8d7da"
+                                  : "#e7f3ff",
+                            color:
+                              bill.status === "paid"
+                                ? "#155724"
+                                : bill.status === "overdue"
+                                  ? "#721c24"
+                                  : "#004085",
+                            fontSize: "0.9em",
+                          }}
+                        >
+                          {bill.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: "12px" }}>
+                        <button
+                          onClick={() => setSelectedBill(bill)}
+                          style={{ marginRight: "5px", padding: "5px 10px", background: "#667eea", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                        >
+                          {language === "bn" ? "দেখুন" : language === "ja" ? "表示" : "View"}
+                        </button>
+                        {!readOnly && (
+                          <button
+                            onClick={() => deleteBill(bill.id)}
+                            disabled={busy}
+                            style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                          >
+                            {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {bills.length === 0 && (
+                <p style={{ textAlign: "center", padding: "20px", color: "#999" }}>
+                  {language === "bn" ? "কোন বিল নেই" : language === "ja" ? "請求書がありません" : "No bills yet"}
+                </p>
+              )}
+            </div>
+
+            {/* Selected Bill Detail */}
+            {selectedBill && (
+              <div style={{ padding: "20px", background: "#f8f9fa", borderRadius: "8px" }}>
+                <h3>Bill #{selectedBill.bill_number}</h3>
+                <p><strong>{language === "bn" ? "গ্রাহক:" : language === "ja" ? "顧客:" : "Customer:"}</strong> {selectedBill.customer_name}</p>
+                <p><strong>{language === "bn" ? "তারিখ:" : language === "ja" ? "日付:" : "Date:"}</strong> {selectedBill.bill_date}</p>
+                <p><strong>{language === "bn" ? "মোট:" : language === "ja" ? "合計:" : "Total:"}</strong> ¥{selectedBill.total_amount.toLocaleString()}</p>
+                <p><strong>{language === "bn" ? "প্রদত্ত:" : language === "ja" ? "支払済み:" : "Paid:"}</strong> ¥{selectedBill.paid_amount.toLocaleString()}</p>
+                <p><strong>{language === "bn" ? "বাকি:" : language === "ja" ? "残り:" : "Due:"}</strong> ¥{(selectedBill.total_amount - selectedBill.paid_amount).toLocaleString()}</p>
+
+                {/* Record Payment */}
+                {!readOnly && selectedBill.paid_amount < selectedBill.total_amount && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = new FormData(e.currentTarget);
+                      recordBillPayment(
+                        selectedBill.id,
+                        Number(form.get("amount")),
+                        String(form.get("method"))
+                      );
+                      (e.currentTarget as HTMLFormElement).reset();
+                    }}
+                    style={{ marginTop: "20px", padding: "15px", background: "white", borderRadius: "8px", border: "1px solid #ddd" }}
+                  >
+                    <h4>{language === "bn" ? "অর্থ প্রদান রেকর্ড করুন" : language === "ja" ? "支払いを記録" : "Record Payment"}</h4>
+                    <label style={{ display: "block", marginBottom: "10px" }}>
+                      {language === "bn" ? "অর্থ" : language === "ja" ? "金額" : "Amount"}
+                      <input
+                        name="amount"
+                        type="number"
+                        required
+                        min="0"
+                        max={selectedBill.total_amount - selectedBill.paid_amount}
+                        placeholder={language === "bn" ? "অর্থ প্রবেশ করুন" : language === "ja" ? "金額を入力" : "Enter payment amount"}
+                        style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                      />
+                    </label>
+
+                    <label style={{ display: "block", marginBottom: "10px" }}>
+                      {language === "bn" ? "পদ্ধতি" : language === "ja" ? "方法" : "Method"}
+                      <select
+                        name="method"
+                        style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                      >
+                        <option>Cash</option>
+                        <option>Bank Transfer</option>
+                        <option>Check</option>
+                        <option>Online</option>
+                      </select>
+                    </label>
+
+                    <button type="submit" disabled={busy} className="finance-button success" style={{ width: "100%" }}>
+                      {language === "bn" ? "পেমেন্ট রেকর্ড করুন" : language === "ja" ? "支払いを記録" : "Record Payment"}
+                    </button>
+                  </form>
+                )}
+
+                {/* Status Update */}
+                {!readOnly && (
+                  <div style={{ marginTop: "20px" }}>
+                    <label style={{ display: "block", marginBottom: "10px" }}>
+                      {language === "bn" ? "অবস্থা আপডেট করুন:" : language === "ja" ? "ステータスを更新:" : "Update Status:"}
+                      <select
+                        value={selectedBill.status}
+                        onChange={(e) => updateBillStatus(selectedBill.id, e.target.value)}
+                        style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                      >
+                        <option value="draft">Draft</option>
+                        <option value="issued">Issued</option>
+                        <option value="sent">Sent</option>
+                        <option value="paid">Paid</option>
+                        <option value="overdue">Overdue</option>
+                      </select>
+                    </label>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setSelectedBill(null)}
+                  style={{ marginTop: "15px", padding: "8px 16px", background: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+                >
+                  {language === "bn" ? "বন্ধ করুন" : language === "ja" ? "閉じる" : "Close"}
+                </button>
+              </div>
+            )}
           </section>
         )}
 
