@@ -1122,6 +1122,10 @@ export default function Home() {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [billDiscount, setBillDiscount] = useState(""); // discount percentage or amount
   const [discountType, setDiscountType] = useState<"percentage" | "fixed">("percentage");
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [editBillItems, setEditBillItems] = useState<Array<{id: number; crop: string; quantity: string; unit: string; price: string; amount: string}>>([]);
+  const [editBillDiscount, setEditBillDiscount] = useState("");
+  const [editDiscountType, setEditDiscountType] = useState<"percentage" | "fixed">("percentage");
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -1799,20 +1803,22 @@ export default function Home() {
 
       <hr style="border: none; border-top: 2px solid #000; margin: 20px 0;">
 
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10px;">
         <thead>
           <tr style="background: #f0f0f0;">
-            <th style="padding: 10px; text-align: left; border-bottom: 2px solid #333; font-weight: bold;">Item</th>
-            <th style="padding: 10px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Qty</th>
-            <th style="padding: 10px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Amount</th>
+            <th style="padding: 8px; text-align: left; border-bottom: 2px solid #333; font-weight: bold;">Item</th>
+            <th style="padding: 8px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Qty</th>
+            <th style="padding: 8px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Unit Price</th>
+            <th style="padding: 8px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Amount</th>
           </tr>
         </thead>
         <tbody>
           ${billItems.map(item => `
             <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 10px; text-align: left;">${item.description}</td>
-              <td style="padding: 10px; text-align: right;">${item.quantity} ${item.unit}</td>
-              <td style="padding: 10px; text-align: right;">¥${item.amount?.toLocaleString()}</td>
+              <td style="padding: 8px; text-align: left;">${item.description}</td>
+              <td style="padding: 8px; text-align: right;">${item.quantity} ${item.unit}</td>
+              <td style="padding: 8px; text-align: right;">¥${item.unit_price?.toLocaleString()}</td>
+              <td style="padding: 8px; text-align: right;">¥${item.amount?.toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1820,8 +1826,25 @@ export default function Home() {
 
       <div style="margin-top: 20px;">
         <div style="display: grid; grid-template-columns: 1fr 1fr; background: #f9f9f9; padding: 10px; margin-bottom: 10px;">
-          <strong style="text-align: right; margin-right: 20px;">TOTAL:</strong>
-          <div style="text-align: right;">¥${bill.total_amount.toLocaleString()}</div>
+          <strong style="text-align: right; margin-right: 20px;">SUBTOTAL:</strong>
+          <div style="text-align: right;">¥${billItems.reduce((sum, item) => sum + (item.amount || 0), 0).toLocaleString()}</div>
+        </div>
+
+        ${(() => {
+          // Calculate if discount was applied by checking if total_amount < subtotal
+          const subtotal = billItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+          const discount = subtotal - bill.total_amount;
+          return discount > 0 ? `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; background: #ffe0e0; padding: 10px; margin-bottom: 10px;">
+              <strong style="text-align: right; margin-right: 20px;">DISCOUNT:</strong>
+              <div style="text-align: right;">-¥${discount.toLocaleString()}</div>
+            </div>
+          ` : '';
+        })()}
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; background: #f0f0f0; padding: 10px; margin-bottom: 10px; border-top: 2px solid #333;">
+          <strong style="text-align: right; margin-right: 20px; font-size: 12px;">TOTAL:</strong>
+          <div style="text-align: right; font-size: 12px; font-weight: bold;">¥${bill.total_amount.toLocaleString()}</div>
         </div>
 
         ${isPaid ? `
@@ -5832,13 +5855,39 @@ export default function Home() {
                           {language === "bn" ? "দেখুন" : language === "ja" ? "表示" : "View"}
                         </button>
                         {!readOnly && (
-                          <button
-                            onClick={() => deleteBill(bill.id)}
-                            disabled={busy}
-                            style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
-                          >
-                            {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
-                          </button>
+                          <>
+                            <button
+                              onClick={async () => {
+                                setEditingBillId(bill.id);
+                                if (supabase) {
+                                  const { data: items } = await supabase
+                                    .from("bill_items")
+                                    .select("*")
+                                    .eq("bill_id", bill.id);
+                                  if (items) {
+                                    setEditBillItems(items.map((item: any) => ({
+                                      id: Math.random(),
+                                      crop: item.description,
+                                      quantity: String(item.quantity),
+                                      unit: item.unit || "",
+                                      price: String(item.unit_price),
+                                      amount: String(item.amount)
+                                    })));
+                                  }
+                                }
+                              }}
+                              style={{ marginRight: "5px", padding: "5px 10px", background: "#ffc107", color: "black", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                            >
+                              {language === "bn" ? "সম্পাদনা" : language === "ja" ? "編集" : "Edit"}
+                            </button>
+                            <button
+                              onClick={() => deleteBill(bill.id)}
+                              disabled={busy}
+                              style={{ padding: "5px 10px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
+                            >
+                              {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
+                            </button>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -5930,6 +5979,178 @@ export default function Home() {
                     style={{ padding: "8px 16px", background: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", flex: 1 }}
                   >
                     {language === "bn" ? "বন্ধ করুন" : language === "ja" ? "閉じる" : "Close"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Edit Bill Mode */}
+            {editingBillId && (
+              <div style={{ padding: "20px", background: "#f8f9fa", borderRadius: "8px", marginTop: "20px" }}>
+                <h3>Edit Bill</h3>
+                <div style={{ overflowX: "auto", marginBottom: "15px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#e7f3ff", borderBottom: "2px solid #667eea" }}>
+                        <th style={{ padding: "10px", textAlign: "left" }}>Item</th>
+                        <th style={{ padding: "10px", textAlign: "right" }}>Qty</th>
+                        <th style={{ padding: "10px", textAlign: "left" }}>Unit</th>
+                        <th style={{ padding: "10px", textAlign: "right" }}>Price</th>
+                        <th style={{ padding: "10px", textAlign: "right" }}>Total</th>
+                        <th style={{ padding: "10px" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editBillItems.map((item, idx) => {
+                        const qty = Number(item.quantity) || 0;
+                        const price = Number(item.price) || 0;
+                        const total = qty * price;
+                        return (
+                          <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
+                            <td style={{ padding: "8px" }}>
+                              <input
+                                type="text"
+                                value={item.crop}
+                                onChange={(e) => {
+                                  const newItems = [...editBillItems];
+                                  newItems[idx].crop = e.target.value;
+                                  setEditBillItems(newItems);
+                                }}
+                                style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                              />
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              <input
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) => {
+                                  const newItems = [...editBillItems];
+                                  newItems[idx].quantity = e.target.value;
+                                  setEditBillItems(newItems);
+                                }}
+                                style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                              />
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              <input
+                                type="text"
+                                value={item.unit}
+                                onChange={(e) => {
+                                  const newItems = [...editBillItems];
+                                  newItems[idx].unit = e.target.value;
+                                  setEditBillItems(newItems);
+                                }}
+                                style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                              />
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              <input
+                                type="number"
+                                value={item.price}
+                                onChange={(e) => {
+                                  const newItems = [...editBillItems];
+                                  newItems[idx].price = e.target.value;
+                                  setEditBillItems(newItems);
+                                }}
+                                style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                              />
+                            </td>
+                            <td style={{ padding: "8px", textAlign: "right", fontWeight: "bold" }}>
+                              ¥{total.toLocaleString()}
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              <button
+                                type="button"
+                                onClick={() => setEditBillItems(editBillItems.filter((_, i) => i !== idx))}
+                                style={{ padding: "4px 8px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.85em" }}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Edit Discount */}
+                <div style={{ padding: "15px", background: "#fff3e0", borderRadius: "4px", marginBottom: "15px" }}>
+                  <h4 style={{ margin: "0 0 10px 0" }}>Discount</h4>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    <label style={{ display: "block" }}>
+                      Type:
+                      <select
+                        value={editDiscountType}
+                        onChange={(e) => setEditDiscountType(e.target.value as "percentage" | "fixed")}
+                        style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                      >
+                        <option value="percentage">Percentage (%)</option>
+                        <option value="fixed">Fixed Amount</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "block" }}>
+                      {editDiscountType === "percentage" ? "%" : "¥"}
+                      <input
+                        type="number"
+                        min="0"
+                        value={editBillDiscount}
+                        onChange={(e) => setEditBillDiscount(e.target.value)}
+                        style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    onClick={async () => {
+                      if (!supabase || !selectedBill) return;
+                      setBusy(true);
+
+                      const subtotal = editBillItems.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+                      let discount = 0;
+                      if (editBillDiscount) {
+                        discount = editDiscountType === "percentage" ? (subtotal * Number(editBillDiscount)) / 100 : Number(editBillDiscount);
+                      }
+                      const finalTotal = Math.max(0, subtotal - discount);
+
+                      // Update bill total
+                      const billResult = await supabase
+                        .from("bills")
+                        .update({ total_amount: finalTotal })
+                        .eq("id", editingBillId);
+
+                      if (!billResult.error) {
+                        // Delete old items
+                        await supabase.from("bill_items").delete().eq("bill_id", editingBillId);
+
+                        // Insert new items
+                        const billItems = editBillItems.map((item) => ({
+                          bill_id: editingBillId,
+                          description: item.crop,
+                          quantity: Number(item.quantity),
+                          unit: item.unit,
+                          unit_price: Number(item.price),
+                          amount: (Number(item.quantity) || 0) * (Number(item.price) || 0),
+                        }));
+                        await supabase.from("bill_items").insert(billItems);
+
+                        setNotice("Bill updated successfully!");
+                        setEditingBillId(null);
+                        await loadWorkspace();
+                      }
+                      setBusy(false);
+                    }}
+                    style={{ flex: 1, padding: "10px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+                  >
+                    Save Changes
+                  </button>
+                  <button
+                    onClick={() => setEditingBillId(null)}
+                    style={{ flex: 1, padding: "10px", background: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+                  >
+                    Cancel
                   </button>
                 </div>
               </div>
