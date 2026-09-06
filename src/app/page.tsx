@@ -1735,6 +1735,9 @@ export default function Home() {
       setNotice(result.error.message);
     } else {
       setNotice("Bill status updated!");
+      if (selectedBill) {
+        setSelectedBill({ ...selectedBill, status: status as "draft" | "issued" | "sent" | "paid" | "overdue" });
+      }
       await loadWorkspace();
     }
   }
@@ -1755,19 +1758,24 @@ export default function Home() {
   }
 
   function downloadBillPDF(bill: Bill, billItems: BillItem[]) {
-    const pdf = new jsPDF();
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     let yPos = 20;
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const margin = 15;
     const contentWidth = pageWidth - 2 * margin;
 
+    // Use Courier font which has better Unicode support
+    pdf.setFont("courier");
+
     // Header
     pdf.setFontSize(20);
+    pdf.setFont("courier", "bold");
     pdf.text("BILL / INVOICE", pageWidth / 2, yPos, { align: "center" });
     yPos += 10;
 
     pdf.setFontSize(11);
+    pdf.setFont("courier", "normal");
     pdf.text(farm?.name || "Community Farm", pageWidth / 2, yPos, { align: "center" });
     yPos += 15;
 
@@ -1786,7 +1794,7 @@ export default function Home() {
     yPos += 8;
 
     // Table Headers
-    pdf.setFont("helvetica", "bold");
+    pdf.setFont("courier", "bold");
     pdf.setFillColor(240, 240, 240);
     const col1Width = contentWidth * 0.6;
     const col2Width = contentWidth * 0.2;
@@ -1799,40 +1807,44 @@ export default function Home() {
     yPos += 8;
 
     // Table Rows
-    pdf.setFont("helvetica", "normal");
+    pdf.setFont("courier", "normal");
+    pdf.setFontSize(9);
     billItems.forEach((item) => {
       if (yPos > pageHeight - 30) {
         pdf.addPage();
         yPos = margin;
       }
 
-      pdf.text(item.description, margin + 2, yPos, { maxWidth: col1Width - 4 });
+      // Split long text if needed
+      const desc = String(item.description || "").substring(0, 30);
+      pdf.text(desc, margin + 2, yPos, { maxWidth: col1Width - 4 });
       pdf.text(`${item.quantity} ${item.unit}`, margin + col1Width + 2, yPos);
-      pdf.text(`¥${item.amount?.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+      pdf.text(`$${item.amount?.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
       yPos += 7;
     });
 
     yPos += 5;
-    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10);
+    pdf.setFont("courier", "bold");
     pdf.setFillColor(249, 249, 249);
     pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
     pdf.text("TOTAL:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-    pdf.text(`¥${bill.total_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+    pdf.text(`$${bill.total_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
     yPos += 7;
 
     pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
     pdf.text("PAID:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-    pdf.text(`¥${bill.paid_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+    pdf.text(`$${bill.paid_amount.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
     yPos += 7;
 
     pdf.setFillColor(220, 240, 250);
     pdf.rect(margin, yPos - 5, contentWidth, 6, "F");
     pdf.text("DUE:", margin + col1Width + 2, yPos, { align: "right", maxWidth: col2Width });
-    pdf.text(`¥${(bill.total_amount - bill.paid_amount).toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
+    pdf.text(`$${(bill.total_amount - bill.paid_amount).toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
 
     // Footer
     yPos = pageHeight - 20;
-    pdf.setFont("helvetica", "normal");
+    pdf.setFont("courier", "normal");
     pdf.setFontSize(9);
     pdf.setTextColor(100);
     pdf.text("Thank you for your business!", pageWidth / 2, yPos, { align: "center" });
