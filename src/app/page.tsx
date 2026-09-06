@@ -1114,12 +1114,14 @@ export default function Home() {
   const [selectedBillCustomer, setSelectedBillCustomer] = useState("");
   const [billDatesForCustomer, setBillDatesForCustomer] = useState<string[]>([]);
   const [manualBillMode, setManualBillMode] = useState(false);
-  const [manualBillItems, setManualBillItems] = useState<Array<{id: number; crop: string; quantity: string; unit: string; amount: string}>>([{id: 1, crop: "", quantity: "", unit: "", amount: ""}]);
+  const [manualBillItems, setManualBillItems] = useState<Array<{id: number; crop: string; quantity: string; unit: string; price: string; amount: string}>>([{id: 1, crop: "", quantity: "", unit: "", price: "", amount: ""}]);
   const lastManualBillLineId = useRef(1);
   const [existingCustomers, setExistingCustomers] = useState<string[]>([]);
   const [allCrops, setAllCrops] = useState<string[]>([]);
   const [showNewCustomerInput, setShowNewCustomerInput] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState("");
+  const [billDiscount, setBillDiscount] = useState(""); // discount percentage or amount
+  const [discountType, setDiscountType] = useState<"percentage" | "fixed">("percentage");
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -1905,27 +1907,40 @@ export default function Home() {
 
     const billDate = String(form.get("bill_date"));
 
-    // Collect line items
+    // Collect line items with new price field
     const items: { crop: string; quantity: number; unit: string; amount: number }[] = [];
     let itemCount = 0;
     while (form.get(`item_crop_${itemCount}`)) {
       const crop = String(form.get(`item_crop_${itemCount}`));
       const quantity = Number(form.get(`item_qty_${itemCount}`)) || 1;
       const unit = String(form.get(`item_unit_${itemCount}`)) || "pcs";
-      const amount = Number(form.get(`item_amount_${itemCount}`)) || 0;
+      const price = Number(form.get(`item_price_${itemCount}`)) || 0;
+      const amount = quantity * price;
 
-      if (crop && amount > 0) {
+      if (crop && price > 0 && quantity > 0) {
         items.push({ crop, quantity, unit, amount });
       }
       itemCount++;
     }
 
     if (items.length === 0) {
-      setNotice("Please add at least one item to the bill");
+      setNotice("Please add at least one item with price and quantity");
       return;
     }
 
-    const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+    let totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+
+    // Apply discount if provided
+    if (billDiscount) {
+      const discountValue = Number(billDiscount);
+      if (discountType === "percentage") {
+        totalAmount = totalAmount - (totalAmount * discountValue) / 100;
+      } else {
+        totalAmount = totalAmount - discountValue;
+      }
+    }
+
+    totalAmount = Math.max(0, totalAmount); // Ensure no negative total
     const { data: sessionData } = await supabase.auth.getSession();
 
     setBusy(true);
@@ -5537,78 +5552,86 @@ export default function Home() {
                       <th style={{ padding: "10px", textAlign: "left" }}>{language === "bn" ? "ফসল" : language === "ja" ? "作物" : "Crop"}</th>
                       <th style={{ padding: "10px", textAlign: "right" }}>{language === "bn" ? "পরিমাণ" : language === "ja" ? "数量" : "Qty"}</th>
                       <th style={{ padding: "10px", textAlign: "left" }}>{language === "bn" ? "একক" : language === "ja" ? "単位" : "Unit"}</th>
-                      <th style={{ padding: "10px", textAlign: "right" }}>{language === "bn" ? "মূল্য" : language === "ja" ? "価格" : "Price"}</th>
+                      <th style={{ padding: "10px", textAlign: "right" }}>{language === "bn" ? "দাম" : language === "ja" ? "価格" : "Price"}</th>
+                      <th style={{ padding: "10px", textAlign: "right" }}>{language === "bn" ? "মোট" : language === "ja" ? "合計" : "Total"}</th>
                       <th style={{ padding: "10px" }}>{language === "bn" ? "কর্ম" : language === "ja" ? "アクション" : "Action"}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {manualBillItems.map((item, idx) => (
-                      <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
-                        <td style={{ padding: "8px" }}>
-                          <select
-                            name={`item_crop_${idx}`}
-                            value={item.crop}
-                            onChange={(e) => {
-                              const newItems = [...manualBillItems];
-                              newItems[idx].crop = e.target.value;
-                              setManualBillItems(newItems);
-                            }}
-                            onClick={() => {
-                              if (allCrops.length === 0) {
-                                loadAllCrops();
-                              }
-                            }}
-                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                            required
-                          >
-                            <option value="">{language === "bn" ? "ফসল নির্বাচন" : language === "ja" ? "作物を選択" : "Select crop"}</option>
-                            {allCrops.map((crop) => (
-                              <option key={crop} value={crop}>{crop}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={{ padding: "8px" }}>
-                          <input
-                            name={`item_qty_${idx}`}
-                            type="number"
-                            placeholder="1"
-                            value={item.quantity}
-                            onChange={(e) => {
-                              const newItems = [...manualBillItems];
-                              newItems[idx].quantity = e.target.value;
-                              setManualBillItems(newItems);
-                            }}
-                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          />
-                        </td>
-                        <td style={{ padding: "8px" }}>
-                          <input
-                            name={`item_unit_${idx}`}
-                            type="text"
-                            placeholder="pcs, kg, box"
-                            value={item.unit}
-                            onChange={(e) => {
-                              const newItems = [...manualBillItems];
-                              newItems[idx].unit = e.target.value;
-                              setManualBillItems(newItems);
-                            }}
-                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          />
-                        </td>
-                        <td style={{ padding: "8px" }}>
-                          <input
-                            name={`item_amount_${idx}`}
-                            type="number"
-                            placeholder="0"
-                            value={item.amount}
-                            onChange={(e) => {
-                              const newItems = [...manualBillItems];
-                              newItems[idx].amount = e.target.value;
-                              setManualBillItems(newItems);
-                            }}
-                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          />
-                        </td>
+                    {manualBillItems.map((item, idx) => {
+                      const qty = Number(item.quantity) || 0;
+                      const price = Number(item.price) || 0;
+                      const total = qty * price;
+                      return (
+                        <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
+                          <td style={{ padding: "8px" }}>
+                            <select
+                              name={`item_crop_${idx}`}
+                              value={item.crop}
+                              onChange={(e) => {
+                                const newItems = [...manualBillItems];
+                                newItems[idx].crop = e.target.value;
+                                setManualBillItems(newItems);
+                              }}
+                              onClick={() => {
+                                if (allCrops.length === 0) {
+                                  loadAllCrops();
+                                }
+                              }}
+                              style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                              required
+                            >
+                              <option value="">{language === "bn" ? "ফসল নির্বাচন" : language === "ja" ? "作物を選択" : "Select crop"}</option>
+                              {allCrops.map((crop) => (
+                                <option key={crop} value={crop}>{crop}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <input
+                              name={`item_qty_${idx}`}
+                              type="number"
+                              placeholder="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const newItems = [...manualBillItems];
+                                newItems[idx].quantity = e.target.value;
+                                setManualBillItems(newItems);
+                              }}
+                              style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <input
+                              name={`item_unit_${idx}`}
+                              type="text"
+                              placeholder="pcs, kg, box"
+                              value={item.unit}
+                              onChange={(e) => {
+                                const newItems = [...manualBillItems];
+                                newItems[idx].unit = e.target.value;
+                                setManualBillItems(newItems);
+                              }}
+                              style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <input
+                              name={`item_price_${idx}`}
+                              type="number"
+                              placeholder="0"
+                              value={item.price}
+                              onChange={(e) => {
+                                const newItems = [...manualBillItems];
+                                newItems[idx].price = e.target.value;
+                                setManualBillItems(newItems);
+                              }}
+                              style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                            />
+                          </td>
+                          <td style={{ padding: "8px", textAlign: "right", fontWeight: "bold" }}>
+                            ¥{total.toLocaleString()}
+                          </td>
                         <td style={{ padding: "8px" }}>
                           {manualBillItems.length > 1 && (
                             <button
@@ -5621,16 +5644,17 @@ export default function Home() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
 
-              <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+              <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
                 <button
                   type="button"
                   onClick={() => {
-                    setManualBillItems([...manualBillItems, { id: ++lastManualBillLineId.current, crop: "", quantity: "", unit: "", amount: "" }]);
+                    setManualBillItems([...manualBillItems, { id: ++lastManualBillLineId.current, crop: "", quantity: "", unit: "", price: "", amount: "" }]);
                   }}
                   style={{ flex: 1, padding: "8px 16px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
                 >
@@ -5647,6 +5671,7 @@ export default function Home() {
                       crop,
                       quantity: "",
                       unit: "",
+                      price: "",
                       amount: ""
                     }));
                     setManualBillItems([...manualBillItems, ...newItems]);
@@ -5658,15 +5683,69 @@ export default function Home() {
                 </button>
               </div>
 
-              {manualBillItems.filter(i => i.crop && i.amount).length > 0 && (
-                <div style={{ padding: "10px", background: "#e7f3ff", borderRadius: "4px", marginBottom: "15px", fontSize: "0.9em" }}>
-                  <strong>{language === "bn" ? "মোট:" : language === "ja" ? "合計:" : "Total:"}</strong> ¥{manualBillItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0).toLocaleString()}
+              {/* Discount Section */}
+              <div style={{ padding: "15px", background: "#fff3e0", borderRadius: "4px", marginBottom: "15px" }}>
+                <h4 style={{ margin: "0 0 10px 0" }}>
+                  {language === "bn" ? "ছাড় (ঐচ্ছিক)" : language === "ja" ? "割引（オプション）" : "Discount (Optional)"}
+                </h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <label style={{ display: "block" }}>
+                    {language === "bn" ? "ছাড়ের ধরন:" : language === "ja" ? "割引タイプ:" : "Type:"}
+                    <select
+                      value={discountType}
+                      onChange={(e) => setDiscountType(e.target.value as "percentage" | "fixed")}
+                      style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                    >
+                      <option value="percentage">{language === "bn" ? "শতাংশ (%)" : language === "ja" ? "パーセンテージ" : "Percentage (%)"}</option>
+                      <option value="fixed">{language === "bn" ? "নির্দিষ্ট পরিমাণ" : language === "ja" ? "固定金額" : "Fixed Amount"}</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "block" }}>
+                    {discountType === "percentage" ? "%" : "¥"}
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={billDiscount}
+                      onChange={(e) => setBillDiscount(e.target.value)}
+                      style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Total with Discount */}
+              {manualBillItems.filter(i => i.crop && (Number(i.price) > 0 || Number(i.quantity) > 0)).length > 0 && (
+                <div style={{ padding: "15px", background: "#e7f3ff", borderRadius: "4px", marginBottom: "15px", fontSize: "0.9em" }}>
+                  {(() => {
+                    const subtotal = manualBillItems.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.price) || 0), 0);
+                    let discount = 0;
+                    if (billDiscount) {
+                      discount = discountType === "percentage" ? (subtotal * Number(billDiscount)) / 100 : Number(billDiscount);
+                    }
+                    const total = subtotal - discount;
+                    return (
+                      <>
+                        <p style={{ margin: "0 0 5px 0" }}>
+                          <strong>{language === "bn" ? "মোট:" : language === "ja" ? "小計:" : "Subtotal:"}</strong> ¥{subtotal.toLocaleString()}
+                        </p>
+                        {discount > 0 && (
+                          <p style={{ margin: "0 0 5px 0", color: "#dc3545" }}>
+                            <strong>{language === "bn" ? "ছাড়:" : language === "ja" ? "割引:" : "Discount:"}</strong> -¥{discount.toLocaleString()}
+                          </p>
+                        )}
+                        <p style={{ margin: "0", fontSize: "1.1em" }}>
+                          <strong>{language === "bn" ? "চূড়ান্ত মোট:" : language === "ja" ? "合計:" : "Final Total:"}</strong> ¥{total.toLocaleString()}
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 
               <button
                 type="submit"
-                disabled={busy || manualBillItems.filter(i => i.crop && i.amount).length === 0}
+                disabled={busy || manualBillItems.filter(i => i.crop && (Number(i.price) > 0 || Number(i.quantity) > 0)).length === 0}
                 className="finance-button primary"
                 style={{ width: "100%" }}
               >
