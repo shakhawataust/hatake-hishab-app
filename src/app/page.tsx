@@ -89,6 +89,14 @@ type SaleLine = {
   quantity: string;
   unit: string;
 };
+// One expense line: category, amount, optional quantity and unit
+type ExpenseLine = {
+  id: number;
+  category: string;
+  amount: string;
+  quantity: string;
+  unit: string;
+};
 type ReportScope = "month" | "all";
 type Language = "bn" | "en" | "ja";
 // "viewer" is the read-only role: every page stays visible, every form and
@@ -1049,6 +1057,9 @@ export default function Home() {
   const [saleLines, setSaleLines] = useState<SaleLine[]>([
     { id: 1, crop: "", amount: "", quantity: "", unit: "" },
   ]);
+  const [expenseLines, setExpenseLines] = useState<ExpenseLine[]>([
+    { id: 1, category: "", amount: "", quantity: "", unit: "" },
+  ]);
   const [customerQuery, setCustomerQuery] = useState("");
   const [openCustomer, setOpenCustomer] = useState<string | null>(null);
   const [allCustomers, setAllCustomers] = useState(false);
@@ -1059,6 +1070,7 @@ export default function Home() {
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
+  const lastExpenseLineId = useRef(1);
   const blankSaleLine = (unit = ""): SaleLine => ({
     id: (lastSaleLineId.current += 1),
     crop: "",
@@ -1066,22 +1078,47 @@ export default function Home() {
     quantity: "",
     unit,
   });
+  const blankExpenseLine = (unit = ""): ExpenseLine => ({
+    id: (lastExpenseLineId.current += 1),
+    category: "",
+    amount: "",
+    quantity: "",
+    unit,
+  });
   const resetSaleLines = () => setSaleLines([blankSaleLine()]);
+  const resetExpenseLines = () => setExpenseLines([blankExpenseLine()]);
   const addSaleLine = () =>
     setSaleLines((lines) => [
       ...lines,
       // The next crop usually goes out in the same unit as the last one.
       blankSaleLine(lines[lines.length - 1]?.unit ?? ""),
     ]);
+  const addExpenseLine = () =>
+    setExpenseLines((lines) => [
+      ...lines,
+      blankExpenseLine(lines[lines.length - 1]?.unit ?? ""),
+    ]);
   const removeSaleLine = (id: number) =>
     setSaleLines((lines) =>
+      lines.length > 1 ? lines.filter((line) => line.id !== id) : lines,
+    );
+  const removeExpenseLine = (id: number) =>
+    setExpenseLines((lines) =>
       lines.length > 1 ? lines.filter((line) => line.id !== id) : lines,
     );
   const changeSaleLine = (id: number, patch: Partial<SaleLine>) =>
     setSaleLines((lines) =>
       lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
     );
+  const changeExpenseLine = (id: number, patch: Partial<ExpenseLine>) =>
+    setExpenseLines((lines) =>
+      lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
+    );
   const saleLinesTotal = saleLines.reduce(
+    (total, line) => total + (Number(line.amount) || 0),
+    0,
+  );
+  const expenseLinesTotal = expenseLines.reduce(
     (total, line) => total + (Number(line.amount) || 0),
     0,
   );
@@ -1410,6 +1447,7 @@ export default function Home() {
     // Sales are entered as a list of crops for one customer, so one save writes
     // one row per crop sharing the same date and customer note. Per-crop rows
     // keep the crop-wise income and harvest figures honest.
+    // Expenses can also be entered as a list of items with different categories.
     const records =
       view === "sales"
         ? saleLines
@@ -1423,17 +1461,29 @@ export default function Home() {
               unit: line.unit.trim() || null,
               note: note || null,
             }))
-        : [
-            {
-              kind: form.get("kind"),
-              occurred_on: form.get("date"),
-              crop: String(form.get("crop")) || null,
-              amount: amount ? Number(amount) : null,
-              quantity: quantity ? Number(quantity) : null,
-              unit: String(form.get("unit") ?? "") || null,
-              note: note || null,
-            },
-          ];
+        : view === "expense"
+          ? expenseLines
+              .filter((line) => line.category && line.amount)
+              .map((line) => ({
+                kind: "expense",
+                occurred_on: form.get("date"),
+                crop: line.category,
+                amount: Number(line.amount),
+                quantity: line.quantity ? Number(line.quantity) : null,
+                unit: line.unit.trim() || null,
+                note: note || null,
+              }))
+          : [
+              {
+                kind: form.get("kind"),
+                occurred_on: form.get("date"),
+                crop: String(form.get("crop")) || null,
+                amount: amount ? Number(amount) : null,
+                quantity: quantity ? Number(quantity) : null,
+                unit: String(form.get("unit") ?? "") || null,
+                note: note || null,
+              },
+            ];
     if (!records.length) {
       setNotice(sales.needItem);
       return;
@@ -1465,6 +1515,7 @@ export default function Home() {
       formElement.reset();
       setEditing(null);
       resetSaleLines();
+      resetExpenseLines();
       await loadWorkspace();
     }
   }
@@ -3174,135 +3225,149 @@ export default function Home() {
                       required
                     />
                   </label>
-                  {view === "sales" ? (
+                  {view === "sales" || view === "expense" ? (
                     <div className="sale-lines full">
                       <div className="sale-lines-head">
-                        <b>{sales.items}</b>
-                        <span>{sales.itemsHint}</span>
+                        <b>{view === "sales" ? sales.items : "খরচ আইটেম / Expense items"}</b>
+                        <span>{view === "sales" ? sales.itemsHint : "এক সাথে বিভিন্ন বিভাগের খরচ যোগ করুন / Add different category expenses at once"}</span>
                       </div>
-                      {saleLines.map((line, index) => (
-                        <div className="sale-line" key={line.id}>
-                          <div className="sale-line-head">
-                            <b>
-                              {sales.item} {index + 1}
-                            </b>
-                            {saleLines.length > 1 && (
-                              <button
-                                type="button"
-                                className="table-delete"
-                                onClick={() => removeSaleLine(line.id)}
-                              >
-                                {sales.remove}
-                              </button>
+                      {(view === "sales" ? saleLines : expenseLines).map((line, index) => {
+                        const saleLine = line as SaleLine;
+                        const expenseLine = line as ExpenseLine;
+                        return (
+                          <div className="sale-line" key={line.id}>
+                            <div className="sale-line-head">
+                              <b>
+                                {view === "sales" ? sales.item : "Item"} {index + 1}
+                              </b>
+                              {(view === "sales" ? saleLines : expenseLines).length > 1 && (
+                                <button
+                                  type="button"
+                                  className="table-delete"
+                                  onClick={() =>
+                                    view === "sales"
+                                      ? removeSaleLine(line.id)
+                                      : removeExpenseLine(line.id)
+                                  }
+                                >
+                                  {view === "sales" ? sales.remove : "Remove"}
+                                </button>
+                              )}
+                            </div>
+                            {view === "sales" ? (
+                              <CropSelect
+                                label={common.crop}
+                                options={knownCrops}
+                                words={common}
+                                className="full"
+                                required
+                                value={saleLine.crop}
+                                onChange={(crop) =>
+                                  changeSaleLine(line.id, { crop })
+                                }
+                              />
+                            ) : (
+                              <label className="full">
+                                {common.category}
+                                <select
+                                  required
+                                  value={expenseLine.category}
+                                  onChange={(event) =>
+                                    changeExpenseLine(line.id, {
+                                      category: event.target.value,
+                                    })
+                                  }
+                                >
+                                  <option value="" disabled>
+                                    {language === "ja"
+                                      ? "カテゴリーを選択"
+                                      : language === "bn"
+                                        ? "বিভাগ নির্বাচন করুন"
+                                        : "Select category"}
+                                  </option>
+                                  {expenseCategories.map((category) => (
+                                    <option key={category}>{category}</option>
+                                  ))}
+                                </select>
+                              </label>
                             )}
+                            <label>
+                              {common.amount}
+                              <input
+                                type="number"
+                                min="0"
+                                required
+                                value={line.amount}
+                                onChange={(event) =>
+                                  (view === "sales" ? changeSaleLine : changeExpenseLine)(
+                                    line.id,
+                                    { amount: event.target.value }
+                                  )
+                                }
+                              />
+                            </label>
+                            <label>
+                              {common.quantity}
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={line.quantity}
+                                onChange={(event) =>
+                                  (view === "sales" ? changeSaleLine : changeExpenseLine)(
+                                    line.id,
+                                    { quantity: event.target.value }
+                                  )
+                                }
+                              />
+                            </label>
+                            <label className="full">
+                              {common.unit}
+                              <input
+                                placeholder="kg / pcs"
+                                value={line.unit}
+                                onChange={(event) =>
+                                  (view === "sales" ? changeSaleLine : changeExpenseLine)(
+                                    line.id,
+                                    { unit: event.target.value }
+                                  )
+                                }
+                              />
+                            </label>
                           </div>
-                          <CropSelect
-                            label={common.crop}
-                            options={knownCrops}
-                            words={common}
-                            className="full"
-                            required
-                            value={line.crop}
-                            onChange={(crop) =>
-                              changeSaleLine(line.id, { crop })
-                            }
-                          />
-                          <label>
-                            {common.amount}
-                            <input
-                              type="number"
-                              min="0"
-                              required
-                              value={line.amount}
-                              onChange={(event) =>
-                                changeSaleLine(line.id, {
-                                  amount: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label>
-                            {common.quantity}
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              required
-                              value={line.quantity}
-                              onChange={(event) =>
-                                changeSaleLine(line.id, {
-                                  quantity: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                          <label className="full">
-                            {common.unit}
-                            <input
-                              placeholder="kg / pcs"
-                              value={line.unit}
-                              onChange={(event) =>
-                                changeSaleLine(line.id, {
-                                  unit: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-                      ))}
+                        );
+                      })}
                       {!editing && (
                         <button
                           type="button"
                           className="finance-button secondary"
-                          onClick={addSaleLine}
+                          onClick={view === "sales" ? addSaleLine : addExpenseLine}
                         >
-                          {sales.addItem}
+                          {view === "sales" ? sales.addItem : "＋ Add another item"}
                         </button>
                       )}
                       <p className="sale-total">
                         <span>
-                          {sales.total} ·{" "}
+                          {view === "sales" ? sales.total : "Total"} ·{" "}
                           {count(
-                            saleLines.length,
-                            sales.itemWord,
-                            sales.itemsWord,
+                            (view === "sales" ? saleLines : expenseLines).length,
+                            view === "sales" ? sales.itemWord : "item",
+                            view === "sales" ? sales.itemsWord : "items"
                           )}
                         </span>
-                        <b>{yen(saleLinesTotal)}</b>
+                        <b>{yen(view === "sales" ? saleLinesTotal : expenseLinesTotal)}</b>
                       </p>
                     </div>
                   ) : (
                     <>
-                      {view === "expense" ? (
-                        <label>
-                          {common.category}
-                          <select
-                            name="crop"
-                            required
-                            defaultValue={editing?.crop ?? ""}
-                          >
-                            <option value="" disabled>
-                              {language === "ja"
-                                ? "カテゴリーを選択"
-                                : language === "bn"
-                                  ? "বিভাগ নির্বাচন করুন"
-                                  : "Select category"}
-                            </option>
-                            {cropOptions(expenseCategories).map((category) => (
-                              <option key={category}>{category}</option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <CropSelect
-                          name="crop"
-                          label={common.crop}
-                          options={knownCrops}
-                          words={common}
-                          required
-                          defaultValue={editing?.crop ?? ""}
-                        />
-                      )}
+                      <CropSelect
+                        name="crop"
+                        label={common.crop}
+                        options={knownCrops}
+                        words={common}
+                        required
+                        defaultValue={editing?.crop ?? ""}
+                      />
                       <label>
                         {view === "harvest"
                           ? `${common.amount} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
@@ -3316,7 +3381,7 @@ export default function Home() {
                         />
                       </label>
                       <label>
-                        {view === "expense"
+                        {view === "harvest"
                           ? `${common.quantity} (${language === "ja" ? "任意" : language === "bn" ? "ঐচ্ছিক" : "optional"})`
                           : common.quantity}
                         <input
@@ -3338,7 +3403,7 @@ export default function Home() {
                       </label>
                     </>
                   )}
-                  {view === "expense" && (
+                  {view === "expense" && !editing && (
                     <HolderSelect
                       name="paid_by"
                       label={common.paidBy}
@@ -3346,7 +3411,7 @@ export default function Home() {
                       words={common}
                       required
                       placeholder="Rafi"
-                      defaultValue={editing ? payerOf(editing) : ""}
+                      defaultValue=""
                     />
                   )}
                   {view === "sales" && (
