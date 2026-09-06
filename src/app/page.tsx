@@ -1108,6 +1108,9 @@ export default function Home() {
   // Bills state
   const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
+  const [billCustomerList, setBillCustomerList] = useState<string[]>([]);
+  const [selectedBillCustomer, setSelectedBillCustomer] = useState("");
+  const [billDatesForCustomer, setBillDatesForCustomer] = useState<string[]>([]);
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -1741,6 +1744,39 @@ export default function Home() {
       setNotice("Bill deleted!");
       await loadWorkspace();
     }
+  }
+
+  function loadBillCustomers() {
+    if (!farm) return;
+
+    // Get all sales transactions
+    const sales = entries.filter(e => e.kind === "sale");
+
+    // Extract unique customers from notes
+    const customers = new Set<string>();
+    sales.forEach(sale => {
+      const customerMatch = sale.note?.match(/Customer: ([^\|]+)/);
+      if (customerMatch) {
+        customers.add(customerMatch[1].trim());
+      }
+    });
+
+    setBillCustomerList(Array.from(customers).sort());
+    setSelectedBillCustomer("");
+    setBillDatesForCustomer([]);
+  }
+
+  function loadDatesForCustomer(customerName: string) {
+    // Get all sales for this customer
+    const sales = entries.filter(
+      e =>
+        e.kind === "sale" &&
+        e.note?.includes(`Customer: ${customerName}`)
+    );
+
+    // Extract unique dates
+    const dates = new Set(sales.map(s => s.occurred_on));
+    setBillDatesForCustomer(Array.from(dates).sort().reverse());
   }
 
   async function saveHandover(event: FormEvent<HTMLFormElement>) {
@@ -5196,36 +5232,57 @@ export default function Home() {
               <h3>{language === "bn" ? "নতুন বিল তৈরি করুন" : language === "ja" ? "新しい請求書を生成" : "Generate New Bill"}</h3>
               <label style={{ display: "block", marginBottom: "15px" }}>
                 {language === "bn" ? "গ্রাহক নাম" : language === "ja" ? "顧客名" : "Customer Name"}
-                <input
-                  name="customer"
-                  type="text"
-                  required
-                  placeholder={language === "bn" ? "গ্রাহক নাম লিখুন" : language === "ja" ? "顧客名を入力" : "Enter customer name"}
-                  style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
-                />
-              </label>
-
-              <label style={{ display: "block", marginBottom: "15px" }}>
-                {language === "bn" ? "শুরু তারিখ" : language === "ja" ? "開始日" : "Start Date"}
-                <input
-                  name="startDate"
-                  type="date"
-                  required
-                  style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
-                />
-              </label>
-
-              <label style={{ display: "block", marginBottom: "15px" }}>
-                {language === "bn" ? "শেষ তারিখ" : language === "ja" ? "終了日" : "End Date"}
-                <input
-                  name="endDate"
-                  type="date"
+                <select
+                  value={selectedBillCustomer}
+                  onChange={(e) => {
+                    setSelectedBillCustomer(e.target.value);
+                    if (e.target.value) {
+                      loadDatesForCustomer(e.target.value);
+                    } else {
+                      setBillDatesForCustomer([]);
+                    }
+                  }}
+                  onClick={() => {
+                    if (billCustomerList.length === 0) {
+                      loadBillCustomers();
+                    }
+                  }}
                   required
                   style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
-                />
+                >
+                  <option value="">{language === "bn" ? "গ্রাহক নির্বাচন করুন" : language === "ja" ? "顧客を選択" : "Select customer"}</option>
+                  {billCustomerList.map((customer) => (
+                    <option key={customer} value={customer}>
+                      {customer}
+                    </option>
+                  ))}
+                </select>
               </label>
 
-              <button type="submit" disabled={busy} className="finance-button primary" style={{ width: "100%" }}>
+              {billDatesForCustomer.length > 0 && (
+                <div style={{ marginBottom: "15px", padding: "10px", background: "#e7f3ff", borderRadius: "4px" }}>
+                  <p style={{ margin: "0 0 5px 0" }}>
+                    <strong>{language === "bn" ? "বিক্রয় তারিখ:" : language === "ja" ? "販売日:" : "Sale Dates:"}</strong>
+                  </p>
+                  <p style={{ margin: "0", fontSize: "0.9em" }}>
+                    {language === "bn" ? "প্রথম:" : language === "ja" ? "開始:" : "From:"} <strong>{billDatesForCustomer[billDatesForCustomer.length - 1]}</strong>
+                    {" "}
+                    {language === "bn" ? "থেকে" : language === "ja" ? "から" : "to"}
+                    {" "}
+                    <strong>{billDatesForCustomer[0]}</strong>
+                  </p>
+                  <p style={{ margin: "5px 0 0 0", fontSize: "0.9em", color: "#666" }}>
+                    {language === "bn" ? "মোট বিক্রয়:" : language === "ja" ? "販売回数:" : "Total sales:"} {billDatesForCustomer.length}
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || !selectedBillCustomer || billDatesForCustomer.length === 0}
+                className="finance-button primary"
+                style={{ width: "100%" }}
+              >
                 {language === "bn" ? "বিল তৈরি করুন" : language === "ja" ? "請求書を生成" : "Generate Bill"}
               </button>
             </form>
