@@ -1178,7 +1178,7 @@ export default function Home() {
           .select("*")
           .eq("farm_id", selected.id)
           .order("occurred_on", { ascending: false })
-          .limit(500),
+          .limit(100000),
         supabase
           .from("crop_batches")
           .select("*")
