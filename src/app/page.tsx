@@ -1111,6 +1111,9 @@ export default function Home() {
   const [billCustomerList, setBillCustomerList] = useState<string[]>([]);
   const [selectedBillCustomer, setSelectedBillCustomer] = useState("");
   const [billDatesForCustomer, setBillDatesForCustomer] = useState<string[]>([]);
+  const [manualBillMode, setManualBillMode] = useState(false);
+  const [manualBillItems, setManualBillItems] = useState<Array<{id: number; crop: string; quantity: string; unit: string; amount: string}>>([{id: 1, crop: "", quantity: "", unit: "", amount: ""}]);
+  const lastManualBillLineId = useRef(1);
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -1742,6 +1745,170 @@ export default function Home() {
       setNotice(result.error.message);
     } else {
       setNotice("Bill deleted!");
+      await loadWorkspace();
+    }
+  }
+
+  function downloadBillPDF(bill: Bill, billItems: BillItem[]) {
+    const doc = `
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .header h1 { margin: 0; }
+            .header p { margin: 5px 0; }
+            .bill-info { margin-bottom: 20px; }
+            .bill-info table { width: 100%; }
+            .bill-info td { padding: 5px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th { background: #f0f0f0; padding: 10px; text-align: left; border-bottom: 2px solid #333; }
+            td { padding: 10px; border-bottom: 1px solid #ddd; }
+            .total-row { font-weight: bold; background: #f9f9f9; }
+            .footer { margin-top: 30px; text-align: center; font-size: 0.9em; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>📄 BILL / INVOICE</h1>
+            <p>${farm?.name || "Community Farm"}</p>
+          </div>
+
+          <div class="bill-info">
+            <table>
+              <tr>
+                <td><strong>Bill #:</strong> ${bill.bill_number}</td>
+                <td><strong>Date:</strong> ${bill.bill_date}</td>
+              </tr>
+              <tr>
+                <td><strong>Customer:</strong> ${bill.customer_name}</td>
+                <td><strong>Status:</strong> ${bill.status.toUpperCase()}</td>
+              </tr>
+            </table>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th style="text-align: right;">Quantity</th>
+                <th style="text-align: right;">Unit Price</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${billItems.map(item => `
+                <tr>
+                  <td>${item.description}</td>
+                  <td style="text-align: right;">${item.quantity} ${item.unit}</td>
+                  <td style="text-align: right;">¥${item.unit_price?.toLocaleString()}</td>
+                  <td style="text-align: right;">¥${item.amount?.toLocaleString()}</td>
+                </tr>
+              `).join("")}
+              <tr class="total-row">
+                <td colspan="3" style="text-align: right;">TOTAL:</td>
+                <td style="text-align: right;">¥${bill.total_amount.toLocaleString()}</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="3" style="text-align: right;">PAID:</td>
+                <td style="text-align: right;">¥${bill.paid_amount.toLocaleString()}</td>
+              </tr>
+              <tr class="total-row">
+                <td colspan="3" style="text-align: right;">DUE:</td>
+                <td style="text-align: right;">¥${(bill.total_amount - bill.paid_amount).toLocaleString()}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="footer">
+            <p>Generated on ${new Date().toLocaleDateString()}</p>
+            <p style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px;">Thank you for your business!</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const blob = new Blob([doc], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Bill-${bill.bill_number}-${bill.customer_name}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  async function createManualBill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase || !farm) return;
+
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const customerName = String(form.get("customer_name"));
+    const billDate = String(form.get("bill_date"));
+
+    // Collect line items
+    const items: { crop: string; quantity: number; unit: string; amount: number }[] = [];
+    let itemCount = 0;
+    while (form.get(`item_crop_${itemCount}`)) {
+      const crop = String(form.get(`item_crop_${itemCount}`));
+      const quantity = Number(form.get(`item_qty_${itemCount}`)) || 1;
+      const unit = String(form.get(`item_unit_${itemCount}`)) || "pcs";
+      const amount = Number(form.get(`item_amount_${itemCount}`)) || 0;
+
+      if (crop && amount > 0) {
+        items.push({ crop, quantity, unit, amount });
+      }
+      itemCount++;
+    }
+
+    if (items.length === 0) {
+      setNotice("Please add at least one item to the bill");
+      return;
+    }
+
+    const totalAmount = items.reduce((sum, item) => sum + item.amount, 0);
+    const { data: sessionData } = await supabase.auth.getSession();
+
+    setBusy(true);
+    const billResult = await supabase
+      .from("bills")
+      .insert({
+        farm_id: farm.id,
+        bill_number: `BILL-${Date.now()}`,
+        customer_name: customerName,
+        bill_date: billDate,
+        total_amount: totalAmount,
+        status: "draft",
+        created_by: sessionData.session?.user.id,
+      })
+      .select();
+
+    if (billResult.error || !billResult.data || !billResult.data[0]) {
+      setBusy(false);
+      setNotice(billResult.error?.message || "Failed to create bill");
+      return;
+    }
+
+    const billId = billResult.data[0].id;
+    const billItems = items.map((item) => ({
+      bill_id: billId,
+      description: item.crop,
+      quantity: item.quantity,
+      unit: item.unit,
+      unit_price: item.amount / item.quantity,
+      amount: item.amount,
+    }));
+
+    const itemsResult = await supabase.from("bill_items").insert(billItems);
+
+    setBusy(false);
+    if (itemsResult.error) {
+      setNotice(itemsResult.error.message);
+    } else {
+      setNotice("Manual bill created successfully!");
+      formElement.reset();
       await loadWorkspace();
     }
   }
@@ -5215,7 +5382,51 @@ export default function Home() {
           <section className="finance-card">
             <h2>📄 {language === "bn" ? "বিল" : language === "ja" ? "請求書" : "Bills"}</h2>
 
-            {/* Generate Bill Form */}
+            {/* Tab Selector */}
+            <div style={{ display: "flex", gap: "10px", marginBottom: "20px", borderBottom: "2px solid #e0e0e0" }}>
+              <button
+                onClick={() => {
+                  setManualBillMode(false);
+                  setSelectedBillCustomer("");
+                  setBillDatesForCustomer([]);
+                  setSelectedBill(null);
+                }}
+                style={{
+                  padding: "10px 20px",
+                  background: !manualBillMode ? "#667eea" : "transparent",
+                  color: !manualBillMode ? "white" : "#666",
+                  border: "none",
+                  borderRadius: "4px 4px 0 0",
+                  cursor: "pointer",
+                  fontWeight: !manualBillMode ? "bold" : "normal"
+                }}
+              >
+                {language === "bn" ? "বিক্রয় থেকে বিল" : language === "ja" ? "販売から" : "Generate from Sales"}
+              </button>
+              <button
+                onClick={() => {
+                  setManualBillMode(true);
+                  setSelectedBillCustomer("");
+                  setBillDatesForCustomer([]);
+                  setSelectedBill(null);
+                }}
+                style={{
+                  padding: "10px 20px",
+                  background: manualBillMode ? "#667eea" : "transparent",
+                  color: manualBillMode ? "white" : "#666",
+                  border: "none",
+                  borderRadius: "4px 4px 0 0",
+                  cursor: "pointer",
+                  fontWeight: manualBillMode ? "bold" : "normal"
+                }}
+              >
+                {language === "bn" ? "ম্যানুয়াল বিল" : language === "ja" ? "手動請求書" : "Manual Bill"}
+              </button>
+            </div>
+
+            {/* OPTION 1: Generate from Sales */}
+            {!selectedBill && (
+            <>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -5260,20 +5471,37 @@ export default function Home() {
               </label>
 
               {billDatesForCustomer.length > 0 && (
-                <div style={{ marginBottom: "15px", padding: "10px", background: "#e7f3ff", borderRadius: "4px" }}>
-                  <p style={{ margin: "0 0 5px 0" }}>
+                <div style={{ marginBottom: "15px", padding: "15px", background: "#e7f3ff", borderRadius: "4px", border: "1px solid #b3d9ff" }}>
+                  <p style={{ margin: "0 0 10px 0" }}>
                     <strong>{language === "bn" ? "বিক্রয় তারিখ:" : language === "ja" ? "販売日:" : "Sale Dates:"}</strong>
                   </p>
-                  <p style={{ margin: "0", fontSize: "0.9em" }}>
+                  <p style={{ margin: "0 0 5px 0", fontSize: "0.9em" }}>
                     {language === "bn" ? "প্রথম:" : language === "ja" ? "開始:" : "From:"} <strong>{billDatesForCustomer[billDatesForCustomer.length - 1]}</strong>
                     {" "}
                     {language === "bn" ? "থেকে" : language === "ja" ? "から" : "to"}
                     {" "}
                     <strong>{billDatesForCustomer[0]}</strong>
                   </p>
-                  <p style={{ margin: "5px 0 0 0", fontSize: "0.9em", color: "#666" }}>
+                  <p style={{ margin: "0", fontSize: "0.85em", color: "#666" }}>
                     {language === "bn" ? "মোট বিক্রয়:" : language === "ja" ? "販売回数:" : "Total sales:"} {billDatesForCustomer.length}
                   </p>
+
+                  {/* Show individual sales */}
+                  <details style={{ marginTop: "10px" }}>
+                    <summary style={{ cursor: "pointer", color: "#667eea", fontWeight: "bold", fontSize: "0.9em" }}>
+                      {language === "bn" ? "বিক্রয় বিবরণ দেখান" : language === "ja" ? "販売の詳細を表示" : "Show individual sales"}
+                    </summary>
+                    <div style={{ marginTop: "10px", maxHeight: "200px", overflowY: "auto", background: "white", padding: "10px", borderRadius: "4px" }}>
+                      {transactions
+                        .filter((t) => t.kind === "sale" && t.note && t.note.includes(selectedBillCustomer))
+                        .filter((t) => billDatesForCustomer.includes(t.occurred_on))
+                        .map((sale) => (
+                          <div key={sale.id} style={{ padding: "8px", borderBottom: "1px solid #eee", fontSize: "0.85em" }}>
+                            <strong>{sale.crop}</strong> - ¥{sale.amount?.toLocaleString()} ({sale.quantity} {sale.unit}) - {sale.occurred_on}
+                          </div>
+                        ))}
+                    </div>
+                  </details>
                 </div>
               )}
 
@@ -5286,6 +5514,160 @@ export default function Home() {
                 {language === "bn" ? "বিল তৈরি করুন" : language === "ja" ? "請求書を生成" : "Generate Bill"}
               </button>
             </form>
+            </>
+            )}
+
+            {/* OPTION 2: Manual Bill Creation */}
+            {manualBillMode && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                createManualBill(e);
+              }}
+              style={{ marginBottom: "30px", padding: "20px", background: "#f8f9fa", borderRadius: "8px" }}
+            >
+              <h3>{language === "bn" ? "ম্যানুয়াল বিল তৈরি করুন" : language === "ja" ? "手動請求書を作成" : "Create Manual Bill"}</h3>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "15px" }}>
+                <label style={{ display: "block" }}>
+                  {language === "bn" ? "গ্রাহক নাম" : language === "ja" ? "顧客名" : "Customer Name"}
+                  <input
+                    name="customer_name"
+                    type="text"
+                    required
+                    placeholder={language === "bn" ? "নতুন বা বিদ্যমান গ্রাহক" : language === "ja" ? "新規または既存の顧客" : "New or existing customer"}
+                    style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                  />
+                </label>
+                <label style={{ display: "block" }}>
+                  {language === "bn" ? "বিল তারিখ" : language === "ja" ? "請求日" : "Bill Date"}
+                  <input
+                    name="bill_date"
+                    type="date"
+                    required
+                    defaultValue={new Date().toISOString().split("T")[0]}
+                    style={{ width: "100%", marginTop: "5px", padding: "8px", border: "1px solid #ddd", borderRadius: "4px" }}
+                  />
+                </label>
+              </div>
+
+              <h4 style={{ marginTop: "20px", marginBottom: "10px" }}>
+                {language === "bn" ? "ফসল / পণ্য যোগ করুন" : language === "ja" ? "作物/商品を追加" : "Add Crops / Products"}
+              </h4>
+
+              <div style={{ overflowX: "auto", marginBottom: "15px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#e7f3ff", borderBottom: "2px solid #667eea" }}>
+                      <th style={{ padding: "10px", textAlign: "left" }}>{language === "bn" ? "ফসল" : language === "ja" ? "作物" : "Crop"}</th>
+                      <th style={{ padding: "10px", textAlign: "right" }}>{language === "bn" ? "পরিমাণ" : language === "ja" ? "数量" : "Qty"}</th>
+                      <th style={{ padding: "10px", textAlign: "left" }}>{language === "bn" ? "একক" : language === "ja" ? "単位" : "Unit"}</th>
+                      <th style={{ padding: "10px", textAlign: "right" }}>{language === "bn" ? "মূল্য" : language === "ja" ? "価格" : "Price"}</th>
+                      <th style={{ padding: "10px" }}>{language === "bn" ? "কর্ম" : language === "ja" ? "アクション" : "Action"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualBillItems.map((item, idx) => (
+                      <tr key={item.id} style={{ borderBottom: "1px solid #ddd" }}>
+                        <td style={{ padding: "8px" }}>
+                          <input
+                            name={`item_crop_${idx}`}
+                            type="text"
+                            placeholder="e.g., Tomato, Rice"
+                            value={item.crop}
+                            onChange={(e) => {
+                              const newItems = [...manualBillItems];
+                              newItems[idx].crop = e.target.value;
+                              setManualBillItems(newItems);
+                            }}
+                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          />
+                        </td>
+                        <td style={{ padding: "8px" }}>
+                          <input
+                            name={`item_qty_${idx}`}
+                            type="number"
+                            placeholder="1"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const newItems = [...manualBillItems];
+                              newItems[idx].quantity = e.target.value;
+                              setManualBillItems(newItems);
+                            }}
+                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          />
+                        </td>
+                        <td style={{ padding: "8px" }}>
+                          <input
+                            name={`item_unit_${idx}`}
+                            type="text"
+                            placeholder="pcs, kg, box"
+                            value={item.unit}
+                            onChange={(e) => {
+                              const newItems = [...manualBillItems];
+                              newItems[idx].unit = e.target.value;
+                              setManualBillItems(newItems);
+                            }}
+                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          />
+                        </td>
+                        <td style={{ padding: "8px" }}>
+                          <input
+                            name={`item_amount_${idx}`}
+                            type="number"
+                            placeholder="0"
+                            value={item.amount}
+                            onChange={(e) => {
+                              const newItems = [...manualBillItems];
+                              newItems[idx].amount = e.target.value;
+                              setManualBillItems(newItems);
+                            }}
+                            style={{ width: "100%", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          />
+                        </td>
+                        <td style={{ padding: "8px" }}>
+                          {manualBillItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setManualBillItems(manualBillItems.filter((_,i) => i !== idx))}
+                              style={{ padding: "4px 8px", background: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.85em" }}
+                            >
+                              {language === "bn" ? "মুছুন" : language === "ja" ? "削除" : "Delete"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setManualBillItems([...manualBillItems, { id: ++lastManualBillLineId.current, crop: "", quantity: "", unit: "", amount: "" }]);
+                }}
+                style={{ padding: "8px 16px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", marginBottom: "15px" }}
+              >
+                {language === "bn" ? "+ আইটেম যোগ করুন" : language === "ja" ? "+ 行を追加" : "+ Add Line"}
+              </button>
+
+              {manualBillItems.filter(i => i.crop && i.amount).length > 0 && (
+                <div style={{ padding: "10px", background: "#e7f3ff", borderRadius: "4px", marginBottom: "15px", fontSize: "0.9em" }}>
+                  <strong>{language === "bn" ? "মোট:" : language === "ja" ? "合計:" : "Total:"}</strong> ¥{manualBillItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0).toLocaleString()}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={busy || manualBillItems.filter(i => i.crop && i.amount).length === 0}
+                className="finance-button primary"
+                style={{ width: "100%" }}
+              >
+                {language === "bn" ? "বিল তৈরি করুন" : language === "ja" ? "請求書を作成" : "Create Bill"}
+              </button>
+            </form>
+            )}
 
             {/* Bills List */}
             <div style={{ overflowX: "auto", marginBottom: "20px" }}>
@@ -5348,7 +5730,18 @@ export default function Home() {
                       </td>
                       <td style={{ padding: "12px" }}>
                         <button
-                          onClick={() => setSelectedBill(bill)}
+                          onClick={async () => {
+                            setSelectedBill(bill);
+                            if (supabase) {
+                              const { data: items } = await supabase
+                                .from("bill_items")
+                                .select("*")
+                                .eq("bill_id", bill.id);
+                              if (items) {
+                                (bill as any).__items = items;
+                              }
+                            }
+                          }}
                           style={{ marginRight: "5px", padding: "5px 10px", background: "#667eea", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "0.9em" }}
                         >
                           {language === "bn" ? "দেখুন" : language === "ja" ? "表示" : "View"}
@@ -5452,12 +5845,23 @@ export default function Home() {
                   </div>
                 )}
 
-                <button
-                  onClick={() => setSelectedBill(null)}
-                  style={{ marginTop: "15px", padding: "8px 16px", background: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
-                >
-                  {language === "bn" ? "বন্ধ করুন" : language === "ja" ? "閉じる" : "Close"}
-                </button>
+                <div style={{ display: "flex", gap: "10px", marginTop: "15px" }}>
+                  <button
+                    onClick={() => {
+                      const billItems = (selectedBill as any).__items || [];
+                      downloadBillPDF(selectedBill, billItems);
+                    }}
+                    style={{ padding: "8px 16px", background: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", flex: 1 }}
+                  >
+                    {language === "bn" ? "📥 PDF ডাউনলোড" : language === "ja" ? "📥 PDF ダウンロード" : "📥 Download PDF"}
+                  </button>
+                  <button
+                    onClick={() => setSelectedBill(null)}
+                    style={{ padding: "8px 16px", background: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", flex: 1 }}
+                  >
+                    {language === "bn" ? "বন্ধ করুন" : language === "ja" ? "閉じる" : "Close"}
+                  </button>
+                </div>
               </div>
             )}
           </section>
