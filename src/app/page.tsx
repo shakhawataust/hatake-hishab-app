@@ -1815,8 +1815,18 @@ export default function Home() {
         yPos = margin;
       }
 
-      // Split long text if needed
-      const desc = String(item.description || "").substring(0, 30);
+      // Extract English part from crop name (remove Bangla/Unicode)
+      let desc = String(item.description || "");
+      // If there's text in parentheses, use only that (English part)
+      const match = desc.match(/\(([^)]+)\)/);
+      if (match) {
+        desc = match[1];
+      } else {
+        // Otherwise keep only ASCII characters
+        desc = desc.replace(/[^\x00-\x7F]/g, "").trim();
+      }
+      desc = desc.substring(0, 30);
+
       pdf.text(desc, margin + 2, yPos, { maxWidth: col1Width - 4 });
       pdf.text(`${item.quantity} ${item.unit}`, margin + col1Width + 2, yPos);
       pdf.text(`$${item.amount?.toLocaleString()}`, margin + col1Width + col2Width + 2, yPos);
