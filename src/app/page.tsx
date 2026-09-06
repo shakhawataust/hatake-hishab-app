@@ -1785,40 +1785,43 @@ export default function Home() {
         body { font-family: 'Noto Sans Bengali', Arial, sans-serif; }
         * { font-family: 'Noto Sans Bengali', Arial, sans-serif; }
       </style>
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="margin: 0; font-size: 24px; font-weight: bold;">BILL / INVOICE</h1>
-        <p style="margin: 10px 0; font-size: 14px;">Chiba Hatake</p>
+      <!-- Header with Logo and Title -->
+      <div style="text-align: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 3px solid #2d5016;">
+        <div style="font-size: 28px; margin-bottom: 5px;">🌿 চিবা হাটেকে সবজির দাম তালিকা 🌿</div>
+        <div style="font-size: 14px; color: #666; margin-bottom: 2px;">Chiba Hatake - Invoice</div>
+        <div style="font-size: 11px; color: #999;">আমাদের তাজা সবজির বিল</div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; font-size: 12px;">
+      <!-- Bill Details -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; font-size: 11px; padding-bottom: 15px; border-bottom: 1px solid #ddd;">
         <div>
-          <p><strong>Bill #:</strong> ${bill.bill_number}</p>
-          <p><strong>Customer:</strong> ${bill.customer_name}</p>
+          <p style="margin: 3px 0;"><strong>বিল নম্বর:</strong> ${bill.bill_number}</p>
+          <p style="margin: 3px 0;"><strong>গ্রাহক:</strong> ${bill.customer_name}</p>
+          <p style="margin: 3px 0;"><strong>Status:</strong> ${bill.status.toUpperCase()}</p>
         </div>
-        <div>
-          <p><strong>Date:</strong> ${bill.bill_date}</p>
-          <p><strong>Status:</strong> ${bill.status.toUpperCase()}</p>
+        <div style="text-align: right;">
+          <p style="margin: 3px 0;"><strong>তারিখ:</strong> ${bill.bill_date}</p>
+          <p style="margin: 3px 0;"><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
         </div>
       </div>
 
-      <hr style="border: none; border-top: 2px solid #000; margin: 20px 0;">
-
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10px;">
+      <!-- Items Table -->
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11px;">
         <thead>
-          <tr style="background: #f0f0f0;">
-            <th style="padding: 8px; text-align: left; border-bottom: 2px solid #333; font-weight: bold;">Item</th>
-            <th style="padding: 8px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Qty</th>
-            <th style="padding: 8px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Unit Price</th>
-            <th style="padding: 8px; text-align: right; border-bottom: 2px solid #333; font-weight: bold;">Amount</th>
+          <tr style="background: #2d5016; color: white;">
+            <th style="padding: 10px 8px; text-align: left; font-weight: bold; border: 1px solid #2d5016;">সবজি / Item</th>
+            <th style="padding: 10px 8px; text-align: center; font-weight: bold; border: 1px solid #2d5016;">পরিমাণ / Qty</th>
+            <th style="padding: 10px 8px; text-align: right; font-weight: bold; border: 1px solid #2d5016;">দাম / Unit Price</th>
+            <th style="padding: 10px 8px; text-align: right; font-weight: bold; border: 1px solid #2d5016;">মোট / Amount</th>
           </tr>
         </thead>
         <tbody>
-          ${billItems.map(item => `
-            <tr style="border-bottom: 1px solid #ddd;">
-              <td style="padding: 8px; text-align: left;">${item.description}</td>
-              <td style="padding: 8px; text-align: right;">${item.quantity} ${item.unit}</td>
-              <td style="padding: 8px; text-align: right;">¥${item.unit_price?.toLocaleString()}</td>
-              <td style="padding: 8px; text-align: right;">¥${item.amount?.toLocaleString()}</td>
+          ${billItems.map((item, idx) => `
+            <tr style="border: 1px solid #ddd; ${idx % 2 === 0 ? 'background: #f9f9f9;' : ''}">
+              <td style="padding: 10px 8px; text-align: left; border: 1px solid #ddd;">${item.description}</td>
+              <td style="padding: 10px 8px; text-align: center; border: 1px solid #ddd;">${item.quantity} ${item.unit}</td>
+              <td style="padding: 10px 8px; text-align: right; border: 1px solid #ddd;">¥${item.unit_price?.toLocaleString()}</td>
+              <td style="padding: 10px 8px; text-align: right; border: 1px solid #ddd; font-weight: bold;">¥${item.amount?.toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -1864,9 +1867,11 @@ export default function Home() {
         `}
       </div>
 
-      <div style="margin-top: 40px; text-align: center; font-size: 11px; color: #666;">
-        <p>Thank you for your business!</p>
-        <p>Generated on ${new Date().toLocaleDateString()}</p>
+      <!-- Footer -->
+      <div style="margin-top: 30px; padding-top: 15px; border-top: 2px solid #2d5016; text-align: center;">
+        <p style="margin: 5px 0; font-size: 12px; font-weight: bold;">ধন্যবাদ আমাদের সাথে কেনাকাটার জন্য! 🙏</p>
+        <p style="margin: 5px 0; font-size: 10px; color: #666;">Thank you for your business!</p>
+        <p style="margin: 10px 0; font-size: 10px; color: #999;">📅 ${bill.bill_date} | 🌱 চিবা হাটেকে</p>
       </div>
     `;
 
