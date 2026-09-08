@@ -2613,6 +2613,50 @@ export default function Home() {
     () => Object.values(summaryByCustomer).reduce((sum, val) => sum + val, 0),
     [summaryByCustomer],
   );
+  const topCrops = useMemo(
+    () => {
+      const filtered = entries.filter(e =>
+        e.kind === "sale" &&
+        e.occurred_on >= summaryStartDate &&
+        e.occurred_on <= summaryEndDate
+      );
+      const result: Record<string, { amount: number; count: number }> = {};
+      filtered.forEach(entry => {
+        const crop = entry.crop || "Unknown";
+        if (!result[crop]) result[crop] = { amount: 0, count: 0 };
+        result[crop].amount += Number(entry.amount ?? 0);
+        result[crop].count += 1;
+      });
+      return Object.entries(result)
+        .map(([crop, data]) => ({ crop, ...data }))
+        .sort((a, b) => b.amount - a.amount);
+    },
+    [entries, summaryStartDate, summaryEndDate],
+  );
+  const topCustomersDetail = useMemo(
+    () => {
+      const filtered = entries.filter(e =>
+        e.kind === "sale" &&
+        e.occurred_on >= summaryStartDate &&
+        e.occurred_on <= summaryEndDate
+      );
+      const result: Record<string, { amount: number; count: number }> = {};
+      filtered.forEach(entry => {
+        const customer =
+          noteValue(entry.note, "Customer") ||
+          noteValue(entry.note, "Buyer") ||
+          "Unknown";
+        if (!result[customer]) result[customer] = { amount: 0, count: 0 };
+        result[customer].amount += Number(entry.amount ?? 0);
+        result[customer].count += 1;
+      });
+      return Object.entries(result)
+        .map(([customer, data]) => ({ customer, ...data }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5);
+    },
+    [entries, summaryStartDate, summaryEndDate],
+  );
   const displayedEntries =
     view === "sales"
       ? entries
@@ -6328,6 +6372,212 @@ export default function Home() {
                 </tr>
               </tfoot>
             </table>
+
+            {/* Top Crops Section */}
+            <div style={{ marginTop: "40px", marginBottom: "40px" }}>
+              <h3 style={{ marginBottom: "20px", color: "#1e7048", fontSize: "18px", display: "flex", alignItems: "center", gap: "8px" }}>
+                🥬 {language === "bn" ? "শীর্ষ ফসল" : language === "ja" ? "トップ作物" : "Top Crops"}
+              </h3>
+              <table style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                borderRadius: "8px",
+                overflow: "hidden",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.08)"
+              }}>
+                <thead>
+                  <tr style={{
+                    background: "linear-gradient(135deg, #1e7048 0%, #2d9666 100%)",
+                    borderBottom: "3px solid #1e7048"
+                  }}>
+                    <th style={{
+                      padding: "16px 20px",
+                      textAlign: "left",
+                      fontWeight: "700",
+                      fontSize: "14px",
+                      color: "#fff",
+                      letterSpacing: "0.5px"
+                    }}>
+                      🌾 {language === "bn" ? "ফসল" : language === "ja" ? "作物" : "Crop"}
+                    </th>
+                    <th style={{
+                      padding: "16px 20px",
+                      textAlign: "right",
+                      fontWeight: "700",
+                      fontSize: "14px",
+                      color: "#fff",
+                      letterSpacing: "0.5px"
+                    }}>
+                      💰 {language === "bn" ? "মূল্য" : language === "ja" ? "金額" : "Amount"}
+                    </th>
+                    <th style={{
+                      padding: "16px 20px",
+                      textAlign: "center",
+                      fontWeight: "700",
+                      fontSize: "14px",
+                      color: "#fff",
+                      letterSpacing: "0.5px",
+                      width: "80px"
+                    }}>
+                      📊 {language === "bn" ? "সংখ্যা" : language === "ja" ? "数" : "Count"}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topCrops.map((item, idx) => (
+                    <tr
+                      key={item.crop}
+                      style={{
+                        borderBottom: "1px solid #e8e8e8",
+                        backgroundColor: idx % 2 === 0 ? "#fff" : "#f0f7f4",
+                        transition: "all 0.3s ease"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#e8f5f0";
+                        e.currentTarget.style.boxShadow = "inset 3px 0 0 #1e7048";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#fff" : "#f0f7f4";
+                        e.currentTarget.style.boxShadow = "none";
+                      }}
+                    >
+                      <td style={{
+                        padding: "14px 20px",
+                        fontSize: "15px",
+                        color: "#1e7048",
+                        fontWeight: "600"
+                      }}>
+                        {item.crop}
+                      </td>
+                      <td style={{
+                        padding: "14px 20px",
+                        textAlign: "right",
+                        fontSize: "15px",
+                        fontWeight: "700",
+                        color: "#1e7048"
+                      }}>
+                        ¥{item.amount.toLocaleString()}
+                      </td>
+                      <td style={{
+                        padding: "14px 20px",
+                        textAlign: "center",
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        color: "#1e7048",
+                        background: "#f0f7f4",
+                        borderRadius: "4px",
+                        margin: "4px"
+                      }}>
+                        {item.count}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Top Customers Detail Section */}
+            <div style={{ marginTop: "40px" }}>
+              <h3 style={{ marginBottom: "20px", color: "#1e7048", fontSize: "18px", display: "flex", alignItems: "center", gap: "8px" }}>
+                👥 {language === "bn" ? "শীর্ষ ক্রেতা" : language === "ja" ? "トップ顧客" : "Top Customers"}
+              </h3>
+              <table style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                borderRadius: "8px",
+                overflow: "hidden",
+                boxShadow: "0 2px 8px rgba(0,0,0,0.08)"
+              }}>
+                <thead>
+                  <tr style={{
+                    background: "linear-gradient(135deg, #1e7048 0%, #2d9666 100%)",
+                    borderBottom: "3px solid #1e7048"
+                  }}>
+                    <th style={{
+                      padding: "16px 20px",
+                      textAlign: "left",
+                      fontWeight: "700",
+                      fontSize: "14px",
+                      color: "#fff",
+                      letterSpacing: "0.5px"
+                    }}>
+                      👤 {language === "bn" ? "ক্রেতা" : language === "ja" ? "顧客" : "Customer"}
+                    </th>
+                    <th style={{
+                      padding: "16px 20px",
+                      textAlign: "right",
+                      fontWeight: "700",
+                      fontSize: "14px",
+                      color: "#fff",
+                      letterSpacing: "0.5px"
+                    }}>
+                      💰 {language === "bn" ? "মূল্য" : language === "ja" ? "金額" : "Amount"}
+                    </th>
+                    <th style={{
+                      padding: "16px 20px",
+                      textAlign: "center",
+                      fontWeight: "700",
+                      fontSize: "14px",
+                      color: "#fff",
+                      letterSpacing: "0.5px",
+                      width: "80px"
+                    }}>
+                      📊 {language === "bn" ? "সংখ্যা" : language === "ja" ? "数" : "Count"}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topCustomersDetail.map((item, idx) => (
+                    <tr
+                      key={item.customer}
+                      style={{
+                        borderBottom: "1px solid #e8e8e8",
+                        backgroundColor: idx % 2 === 0 ? "#fff" : "#f0f7f4",
+                        transition: "all 0.3s ease"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#e8f5f0";
+                        e.currentTarget.style.boxShadow = "inset 3px 0 0 #1e7048";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#fff" : "#f0f7f4";
+                        e.currentTarget.style.boxShadow = "none";
+                      }}
+                    >
+                      <td style={{
+                        padding: "14px 20px",
+                        fontSize: "15px",
+                        color: "#1e7048",
+                        fontWeight: "600"
+                      }}>
+                        {item.customer}
+                      </td>
+                      <td style={{
+                        padding: "14px 20px",
+                        textAlign: "right",
+                        fontSize: "15px",
+                        fontWeight: "700",
+                        color: "#1e7048"
+                      }}>
+                        ¥{item.amount.toLocaleString()}
+                      </td>
+                      <td style={{
+                        padding: "14px 20px",
+                        textAlign: "center",
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        color: "#1e7048",
+                        background: "#f0f7f4",
+                        borderRadius: "4px",
+                        margin: "4px"
+                      }}>
+                        {item.count}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
