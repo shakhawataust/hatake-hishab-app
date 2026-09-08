@@ -6195,26 +6195,30 @@ export default function Home() {
         )}
 
         {view === "summary" && (
-          <section className="finance-card" style={{ maxWidth: "800px", margin: "0 auto" }}>
+          <section className="finance-card" style={{ maxWidth: "900px", margin: "0 auto" }}>
             <div style={{ marginBottom: "30px" }}>
-              <h2 style={{ marginBottom: "10px" }}>📊 {language === "bn" ? "বিক্রি সারসংক্ষেপ" : language === "ja" ? "販売サマリー" : "Sales Summary"}</h2>
-              <div style={{ display: "flex", gap: "15px", marginBottom: "20px" }}>
+              <h2 style={{ marginBottom: "20px", color: "#1e7048", fontSize: "24px" }}>📊 {language === "bn" ? "বিক্রি সারসংক্ষেপ" : language === "ja" ? "販売サマリー" : "Sales Summary"}</h2>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px", marginBottom: "25px" }}>
                 <label style={{ flex: 1 }}>
-                  {language === "bn" ? "শুরু তারিখ" : language === "ja" ? "開始日" : "Start Date"}
+                  <span style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#555", marginBottom: "6px" }}>
+                    {language === "bn" ? "শুরু তারিখ" : language === "ja" ? "開始日" : "📅 Start Date"}
+                  </span>
                   <input
                     type="date"
                     value={summaryStartDate}
                     onChange={(e) => setSummaryStartDate(e.target.value)}
-                    style={{ width: "100%", marginTop: "5px" }}
+                    style={{ width: "100%", marginTop: "0px", padding: "10px 12px", border: "2px solid #e0e0e0", borderRadius: "6px", fontSize: "14px" }}
                   />
                 </label>
                 <label style={{ flex: 1 }}>
-                  {language === "bn" ? "শেষ তারিখ" : language === "ja" ? "終了日" : "End Date"}
+                  <span style={{ display: "block", fontSize: "13px", fontWeight: "600", color: "#555", marginBottom: "6px" }}>
+                    {language === "bn" ? "শেষ তারিখ" : language === "ja" ? "終了日" : "📅 End Date"}
+                  </span>
                   <input
                     type="date"
                     value={summaryEndDate}
                     onChange={(e) => setSummaryEndDate(e.target.value)}
-                    style={{ width: "100%", marginTop: "5px" }}
+                    style={{ width: "100%", marginTop: "0px", padding: "10px 12px", border: "2px solid #e0e0e0", borderRadius: "6px", fontSize: "14px" }}
                   />
                 </label>
               </div>
@@ -6223,87 +6227,101 @@ export default function Home() {
             <table style={{
               width: "100%",
               borderCollapse: "collapse",
-              marginBottom: "20px"
+              marginBottom: "20px",
+              borderRadius: "8px",
+              overflow: "hidden",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)"
             }}>
               <thead>
                 <tr style={{
-                  background: "#f8f9fa",
-                  borderBottom: "2px solid #ddd"
+                  background: "linear-gradient(135deg, #1e7048 0%, #2d9666 100%)",
+                  borderBottom: "3px solid #1e7048"
                 }}>
                   <th style={{
-                    padding: "12px 16px",
+                    padding: "16px 20px",
                     textAlign: "left",
-                    fontWeight: "600",
+                    fontWeight: "700",
                     fontSize: "14px",
-                    color: "#333"
+                    color: "#fff",
+                    letterSpacing: "0.5px"
                   }}>
-                    {language === "bn" ? "গ্রাহক" : language === "ja" ? "顧客" : "Customer"}
+                    👤 {language === "bn" ? "গ্রাহক" : language === "ja" ? "顧客" : "Customer"}
                   </th>
                   <th style={{
-                    padding: "12px 16px",
+                    padding: "16px 20px",
                     textAlign: "right",
-                    fontWeight: "600",
+                    fontWeight: "700",
                     fontSize: "14px",
-                    color: "#333"
+                    color: "#fff",
+                    letterSpacing: "0.5px"
                   }}>
-                    {language === "bn" ? "বিক্রয়" : language === "ja" ? "売上" : "Amount"}
+                    💰 {language === "bn" ? "বিক্রয়" : language === "ja" ? "売上" : "Amount"}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(summaryByCustomer).map(([customer, amount], idx) => (
-                  <tr
-                    key={customer}
-                    style={{
-                      borderBottom: "1px solid #eee",
-                      backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9",
-                      transition: "background-color 0.2s"
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = "#f0f3ff";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#fff" : "#f9f9f9";
-                    }}
-                  >
-                    <td style={{
-                      padding: "14px 16px",
-                      fontSize: "15px",
-                      color: "#333",
-                      fontWeight: "500"
-                    }}>
-                      {customer}
-                    </td>
-                    <td style={{
-                      padding: "14px 16px",
-                      textAlign: "right",
-                      fontSize: "15px",
-                      fontWeight: "600",
-                      color: "#667eea"
-                    }}>
-                      ¥{amount.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
+                {Object.entries(summaryByCustomer).map(([customer, amount], idx) => {
+                  const colors = ["#fff", "#f0f7f4"];
+                  const hoverColor = "#e8f5f0";
+                  return (
+                    <tr
+                      key={customer}
+                      style={{
+                        borderBottom: "1px solid #e8e8e8",
+                        backgroundColor: colors[idx % 2],
+                        transition: "all 0.3s ease",
+                        cursor: "pointer"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = hoverColor;
+                        e.currentTarget.style.boxShadow = "inset 3px 0 0 #1e7048";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = colors[idx % 2];
+                        e.currentTarget.style.boxShadow = "none";
+                      }}
+                    >
+                      <td style={{
+                        padding: "16px 20px",
+                        fontSize: "15px",
+                        color: "#1e7048",
+                        fontWeight: "600"
+                      }}>
+                        {customer}
+                      </td>
+                      <td style={{
+                        padding: "16px 20px",
+                        textAlign: "right",
+                        fontSize: "16px",
+                        fontWeight: "700",
+                        color: "#1e7048"
+                      }}>
+                        ¥{amount.toLocaleString()}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr style={{
-                  borderTop: "2px solid #ddd",
-                  background: "#f8f9fa",
+                  borderTop: "3px solid #1e7048",
+                  background: "linear-gradient(135deg, #f0f7f4 0%, #e8f5f0 100%)",
                   fontWeight: "bold"
                 }}>
                   <td style={{
-                    padding: "14px 16px",
+                    padding: "18px 20px",
                     fontSize: "15px",
-                    color: "#333"
+                    color: "#1e7048",
+                    fontWeight: "700"
                   }}>
-                    {language === "bn" ? "মোট" : language === "ja" ? "合計" : "Total"}
+                    📊 {language === "bn" ? "মোট" : language === "ja" ? "合計" : "Total"}
                   </td>
                   <td style={{
-                    padding: "14px 16px",
+                    padding: "18px 20px",
                     textAlign: "right",
-                    fontSize: "16px",
-                    color: "#667eea"
+                    fontSize: "18px",
+                    color: "#1e7048",
+                    fontWeight: "700"
                   }}>
                     ¥{summaryTotal.toLocaleString()}
                   </td>
