@@ -2659,16 +2659,16 @@ export default function Home() {
   );
   const cashDetails = useMemo(
     () => {
-      const filtered = cashHandovers.filter(h =>
+      const filtered = handovers.filter((h: CashHandover) =>
         h.occurred_on >= summaryStartDate &&
         h.occurred_on <= summaryEndDate
       );
-      return filtered.sort((a, b) => new Date(b.occurred_on).getTime() - new Date(a.occurred_on).getTime());
+      return filtered.sort((a: CashHandover, b: CashHandover) => new Date(b.occurred_on).getTime() - new Date(a.occurred_on).getTime());
     },
-    [cashHandovers, summaryStartDate, summaryEndDate],
+    [handovers, summaryStartDate, summaryEndDate],
   );
   const cashTotal = useMemo(
-    () => cashDetails.reduce((sum, h) => sum + (h.amount || 0), 0),
+    () => cashDetails.reduce((sum: number, h: CashHandover) => sum + (h.amount || 0), 0),
     [cashDetails],
   );
   const displayedEntries =
@@ -6654,7 +6654,7 @@ export default function Home() {
                     </tr>
                   </thead>
                   <tbody>
-                    {cashDetails.map((item, idx) => (
+                    {cashDetails.map((item: CashHandover, idx: number) => (
                       <tr
                         key={item.id}
                         style={{
