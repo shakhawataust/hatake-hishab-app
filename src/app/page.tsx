@@ -2597,7 +2597,10 @@ export default function Home() {
       );
       const result: Record<string, number> = {};
       filtered.forEach(entry => {
-        const customer = entry.note || "Unknown";
+        const customer =
+          noteValue(entry.note, "Customer") ||
+          noteValue(entry.note, "Buyer") ||
+          "Unknown";
         result[customer] = (result[customer] ?? 0) + Number(entry.amount ?? 0);
       });
       return Object.fromEntries(
