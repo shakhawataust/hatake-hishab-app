@@ -143,6 +143,7 @@ type View =
   | "expense"
   | "sales"
   | "bills"
+  | "summary"
   | "harvest"
   | "batches"
   | "orders"
@@ -157,6 +158,7 @@ const views: { id: View; label: string; icon: string }[] = [
   { id: "expense", label: "খরচ যোগ করুন", icon: "💸" },
   { id: "sales", label: "বিক্রি / Sales", icon: "🧺" },
   { id: "bills", label: "📄 Bills", icon: "📄" },
+  { id: "summary", label: "📊 Summary", icon: "📊" },
   { id: "harvest", label: "Harvest", icon: "🥬" },
   { id: "batches", label: "Crop Batches", icon: "🌾" },
   { id: "orders", label: "Customers & Orders", icon: "📦" },
@@ -172,6 +174,7 @@ const labels: Record<Language, Record<View, string>> = {
     expense: "খরচ",
     sales: "বিক্রি",
     bills: "বিল",
+    summary: "বিক্রি সারসংক্ষেপ",
     harvest: "ফসল সংগ্রহ",
     batches: "ফসল ব্যাচ",
     orders: "ক্রেতা ও অর্ডার",
@@ -186,6 +189,7 @@ const labels: Record<Language, Record<View, string>> = {
     expense: "Expense",
     sales: "Sales",
     bills: "Bills",
+    summary: "Sales Summary",
     harvest: "Harvest",
     batches: "Crop Batches",
     orders: "Customers & Orders",
@@ -200,6 +204,7 @@ const labels: Record<Language, Record<View, string>> = {
     expense: "経費",
     sales: "販売",
     bills: "請求書",
+    summary: "販売サマリー",
     harvest: "収穫",
     batches: "作物ロット",
     orders: "顧客・注文",
@@ -1126,6 +1131,9 @@ export default function Home() {
   const [editBillItems, setEditBillItems] = useState<Array<{id: number; crop: string; quantity: string; unit: string; price: string; amount: string}>>([]);
   const [editBillDiscount, setEditBillDiscount] = useState("");
   const [editDiscountType, setEditDiscountType] = useState<"percentage" | "fixed">("percentage");
+  // Summary view state
+  const [summaryStartDate, setSummaryStartDate] = useState(today());
+  const [summaryEndDate, setSummaryEndDate] = useState(today());
   // Line ids never repeat, not even after a save, so an emptied form mounts
   // fresh fields instead of reusing the last one's "typing a new crop" state.
   const lastSaleLineId = useRef(1);
@@ -2579,6 +2587,28 @@ export default function Home() {
           }, {}),
       ).sort((a, b) => b[1] - a[1]),
     [entries],
+  );
+  const summaryByCustomer = useMemo(
+    () => {
+      const filtered = entries.filter(e =>
+        e.kind === "sale" &&
+        e.occurred_on >= summaryStartDate &&
+        e.occurred_on <= summaryEndDate
+      );
+      const result: Record<string, number> = {};
+      filtered.forEach(entry => {
+        const customer = entry.note || "Unknown";
+        result[customer] = (result[customer] ?? 0) + Number(entry.amount ?? 0);
+      });
+      return Object.fromEntries(
+        Object.entries(result).sort((a, b) => b[1] - a[1])
+      );
+    },
+    [entries, summaryStartDate, summaryEndDate],
+  );
+  const summaryTotal = useMemo(
+    () => Object.values(summaryByCustomer).reduce((sum, val) => sum + val, 0),
+    [summaryByCustomer],
   );
   const displayedEntries =
     view === "sales"
@@ -6158,6 +6188,104 @@ export default function Home() {
                 </div>
               </div>
             )}
+          </section>
+        )}
+
+        {view === "summary" && (
+          <section className="finance-card" style={{ maxWidth: "800px", margin: "0 auto" }}>
+            <div style={{ marginBottom: "30px" }}>
+              <h2 style={{ marginBottom: "10px" }}>📊 {language === "bn" ? "বিক্রি সারসংক্ষেপ" : language === "ja" ? "販売サマリー" : "Sales Summary"}</h2>
+              <div style={{ display: "flex", gap: "15px", marginBottom: "20px" }}>
+                <label style={{ flex: 1 }}>
+                  {language === "bn" ? "শুরু তারিখ" : language === "ja" ? "開始日" : "Start Date"}
+                  <input
+                    type="date"
+                    value={summaryStartDate}
+                    onChange={(e) => setSummaryStartDate(e.target.value)}
+                    style={{ width: "100%", marginTop: "5px" }}
+                  />
+                </label>
+                <label style={{ flex: 1 }}>
+                  {language === "bn" ? "শেষ তারিখ" : language === "ja" ? "終了日" : "End Date"}
+                  <input
+                    type="date"
+                    value={summaryEndDate}
+                    onChange={(e) => setSummaryEndDate(e.target.value)}
+                    style={{ width: "100%", marginTop: "5px" }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "0",
+              border: "1px solid #eee",
+              borderRadius: "8px",
+              overflow: "hidden"
+            }}>
+              {Object.entries(summaryByCustomer).map(([customer, amount], idx) => {
+                const maxAmount = Math.max(...Object.values(summaryByCustomer) as number[]);
+                const percentage = (amount / maxAmount) * 100;
+                return (
+                  <div
+                    key={customer}
+                    style={{
+                      padding: "16px 20px",
+                      borderBottom: idx < Object.keys(summaryByCustomer).length - 1 ? "1px solid #eee" : "none",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      position: "relative",
+                      backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9"
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      height: "100%",
+                      backgroundColor: "#667eea",
+                      opacity: 0.08,
+                      width: `${percentage}%`
+                    }} />
+                    <span style={{
+                      fontWeight: "500",
+                      fontSize: "16px",
+                      position: "relative",
+                      zIndex: 1
+                    }}>
+                      {customer}
+                    </span>
+                    <span style={{
+                      fontWeight: "bold",
+                      fontSize: "18px",
+                      color: "#667eea",
+                      position: "relative",
+                      zIndex: 1
+                    }}>
+                      ¥{amount.toLocaleString()}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{
+              marginTop: "20px",
+              padding: "16px",
+              background: "#f0f3ff",
+              borderRadius: "8px",
+              textAlign: "center"
+            }}>
+              <p style={{ margin: "0 0 8px 0", fontSize: "14px", color: "#666" }}>
+                {language === "bn" ? "মোট বিক্রয়" : language === "ja" ? "合計売上" : "Total Sales"}
+              </p>
+              <p style={{ margin: "0", fontSize: "32px", fontWeight: "bold", color: "#667eea" }}>
+                ¥{summaryTotal.toLocaleString()}
+              </p>
+            </div>
           </section>
         )}
 
