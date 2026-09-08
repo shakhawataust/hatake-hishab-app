@@ -6217,75 +6217,96 @@ export default function Home() {
               </div>
             </div>
 
-            <div style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "0",
-              border: "1px solid #eee",
-              borderRadius: "8px",
-              overflow: "hidden"
+            <table style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              marginBottom: "20px"
             }}>
-              {Object.entries(summaryByCustomer).map(([customer, amount], idx) => {
-                const maxAmount = Math.max(...Object.values(summaryByCustomer) as number[]);
-                const percentage = (amount / maxAmount) * 100;
-                return (
-                  <div
+              <thead>
+                <tr style={{
+                  background: "#f8f9fa",
+                  borderBottom: "2px solid #ddd"
+                }}>
+                  <th style={{
+                    padding: "12px 16px",
+                    textAlign: "left",
+                    fontWeight: "600",
+                    fontSize: "14px",
+                    color: "#333"
+                  }}>
+                    {language === "bn" ? "গ্রাহক" : language === "ja" ? "顧客" : "Customer"}
+                  </th>
+                  <th style={{
+                    padding: "12px 16px",
+                    textAlign: "right",
+                    fontWeight: "600",
+                    fontSize: "14px",
+                    color: "#333"
+                  }}>
+                    {language === "bn" ? "বিক্রয়" : language === "ja" ? "売上" : "Amount"}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(summaryByCustomer).map(([customer, amount], idx) => (
+                  <tr
                     key={customer}
                     style={{
-                      padding: "16px 20px",
-                      borderBottom: idx < Object.keys(summaryByCustomer).length - 1 ? "1px solid #eee" : "none",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      position: "relative",
-                      backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9"
+                      borderBottom: "1px solid #eee",
+                      backgroundColor: idx % 2 === 0 ? "#fff" : "#f9f9f9",
+                      transition: "background-color 0.2s"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "#f0f3ff";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#fff" : "#f9f9f9";
                     }}
                   >
-                    <div style={{
-                      position: "absolute",
-                      left: 0,
-                      top: 0,
-                      height: "100%",
-                      backgroundColor: "#667eea",
-                      opacity: 0.08,
-                      width: `${percentage}%`
-                    }} />
-                    <span style={{
-                      fontWeight: "500",
-                      fontSize: "16px",
-                      position: "relative",
-                      zIndex: 1
+                    <td style={{
+                      padding: "14px 16px",
+                      fontSize: "15px",
+                      color: "#333",
+                      fontWeight: "500"
                     }}>
                       {customer}
-                    </span>
-                    <span style={{
-                      fontWeight: "bold",
-                      fontSize: "18px",
-                      color: "#667eea",
-                      position: "relative",
-                      zIndex: 1
+                    </td>
+                    <td style={{
+                      padding: "14px 16px",
+                      textAlign: "right",
+                      fontSize: "15px",
+                      fontWeight: "600",
+                      color: "#667eea"
                     }}>
                       ¥{amount.toLocaleString()}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{
-              marginTop: "20px",
-              padding: "16px",
-              background: "#f0f3ff",
-              borderRadius: "8px",
-              textAlign: "center"
-            }}>
-              <p style={{ margin: "0 0 8px 0", fontSize: "14px", color: "#666" }}>
-                {language === "bn" ? "মোট বিক্রয়" : language === "ja" ? "合計売上" : "Total Sales"}
-              </p>
-              <p style={{ margin: "0", fontSize: "32px", fontWeight: "bold", color: "#667eea" }}>
-                ¥{summaryTotal.toLocaleString()}
-              </p>
-            </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{
+                  borderTop: "2px solid #ddd",
+                  background: "#f8f9fa",
+                  fontWeight: "bold"
+                }}>
+                  <td style={{
+                    padding: "14px 16px",
+                    fontSize: "15px",
+                    color: "#333"
+                  }}>
+                    {language === "bn" ? "মোট" : language === "ja" ? "合計" : "Total"}
+                  </td>
+                  <td style={{
+                    padding: "14px 16px",
+                    textAlign: "right",
+                    fontSize: "16px",
+                    color: "#667eea"
+                  }}>
+                    ¥{summaryTotal.toLocaleString()}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </section>
         )}
 
