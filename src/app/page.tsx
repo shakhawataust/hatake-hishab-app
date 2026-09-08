@@ -2657,6 +2657,20 @@ export default function Home() {
     },
     [entries, summaryStartDate, summaryEndDate],
   );
+  const cashDetails = useMemo(
+    () => {
+      const filtered = cashHandovers.filter(h =>
+        h.occurred_on >= summaryStartDate &&
+        h.occurred_on <= summaryEndDate
+      );
+      return filtered.sort((a, b) => new Date(b.occurred_on).getTime() - new Date(a.occurred_on).getTime());
+    },
+    [cashHandovers, summaryStartDate, summaryEndDate],
+  );
+  const cashTotal = useMemo(
+    () => cashDetails.reduce((sum, h) => sum + (h.amount || 0), 0),
+    [cashDetails],
+  );
   const displayedEntries =
     view === "sales"
       ? entries
@@ -6578,6 +6592,151 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
+
+            {/* Cash Handovers Section */}
+            {cashDetails.length > 0 && (
+              <div style={{ marginTop: "40px" }}>
+                <h3 style={{ marginBottom: "20px", color: "#1e7048", fontSize: "18px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  💵 {language === "bn" ? "নগদ লেনদেন" : language === "ja" ? "現金取引" : "Cash Transactions"}
+                </h3>
+                <table style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.08)"
+                }}>
+                  <thead>
+                    <tr style={{
+                      background: "linear-gradient(135deg, #1e7048 0%, #2d9666 100%)",
+                      borderBottom: "3px solid #1e7048"
+                    }}>
+                      <th style={{
+                        padding: "16px 20px",
+                        textAlign: "left",
+                        fontWeight: "700",
+                        fontSize: "14px",
+                        color: "#fff",
+                        letterSpacing: "0.5px"
+                      }}>
+                        📤 {language === "bn" ? "প্রদানকারী" : language === "ja" ? "送信者" : "From"}
+                      </th>
+                      <th style={{
+                        padding: "16px 20px",
+                        textAlign: "left",
+                        fontWeight: "700",
+                        fontSize: "14px",
+                        color: "#fff",
+                        letterSpacing: "0.5px"
+                      }}>
+                        📥 {language === "bn" ? "গ্রহণকারী" : language === "ja" ? "受信者" : "To"}
+                      </th>
+                      <th style={{
+                        padding: "16px 20px",
+                        textAlign: "right",
+                        fontWeight: "700",
+                        fontSize: "14px",
+                        color: "#fff",
+                        letterSpacing: "0.5px"
+                      }}>
+                        💰 {language === "bn" ? "পরিমাণ" : language === "ja" ? "金額" : "Amount"}
+                      </th>
+                      <th style={{
+                        padding: "16px 20px",
+                        textAlign: "center",
+                        fontWeight: "700",
+                        fontSize: "14px",
+                        color: "#fff",
+                        letterSpacing: "0.5px"
+                      }}>
+                        📅 {language === "bn" ? "তারিখ" : language === "ja" ? "日付" : "Date"}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cashDetails.map((item, idx) => (
+                      <tr
+                        key={item.id}
+                        style={{
+                          borderBottom: "1px solid #e8e8e8",
+                          backgroundColor: idx % 2 === 0 ? "#fff" : "#f0f7f4",
+                          transition: "all 0.3s ease"
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = "#e8f5f0";
+                          e.currentTarget.style.boxShadow = "inset 3px 0 0 #1e7048";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = idx % 2 === 0 ? "#fff" : "#f0f7f4";
+                          e.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
+                        <td style={{
+                          padding: "14px 20px",
+                          fontSize: "15px",
+                          color: "#1e7048",
+                          fontWeight: "600"
+                        }}>
+                          {item.from_holder}
+                        </td>
+                        <td style={{
+                          padding: "14px 20px",
+                          fontSize: "15px",
+                          color: "#1e7048",
+                          fontWeight: "600"
+                        }}>
+                          {item.to_holder}
+                        </td>
+                        <td style={{
+                          padding: "14px 20px",
+                          textAlign: "right",
+                          fontSize: "15px",
+                          fontWeight: "700",
+                          color: "#1e7048"
+                        }}>
+                          ¥{item.amount.toLocaleString()}
+                        </td>
+                        <td style={{
+                          padding: "14px 20px",
+                          textAlign: "center",
+                          fontSize: "14px",
+                          color: "#1e7048",
+                          fontWeight: "500"
+                        }}>
+                          {new Date(item.occurred_on).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{
+                      borderTop: "3px solid #1e7048",
+                      background: "linear-gradient(135deg, #f0f7f4 0%, #e8f5f0 100%)",
+                      fontWeight: "bold"
+                    }}>
+                      <td colSpan={3} style={{
+                        padding: "16px 20px",
+                        fontSize: "15px",
+                        color: "#1e7048",
+                        fontWeight: "700",
+                        textAlign: "right"
+                      }}>
+                        💰 {language === "bn" ? "মোট নগদ" : language === "ja" ? "合計現金" : "Total Cash"} →
+                      </td>
+                      <td style={{
+                        padding: "16px 20px",
+                        textAlign: "center",
+                        fontSize: "16px",
+                        color: "#1e7048",
+                        fontWeight: "700"
+                      }}>
+                        ¥{cashTotal.toLocaleString()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </section>
         )}
 
